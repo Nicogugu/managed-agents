@@ -346,7 +346,8 @@ Affichée dans la `TodosBar` collapsible en haut, avec phase courante (DISCOVER/
 
 ## Sécurité & limites de coût
 
-- **Auth Basic via Traefik** : toute l'app (web + API) est gated derrière une auth HTTP Basic. Génère ton hash via `htpasswd -nbB user motDePasse | sed -e 's/\$/\$\$/g'` et passe en secret GitHub `EDITOR_AUTH_USERS` (format `user:bcryptHash`). Le browser ouvre une popup de login au premier accès.
+- **Auth Basic Express** : `/api/*` (sauf `/api/health` laissé public pour les health checks externes) est gated par un middleware Basic Auth. Configurable via env `AUTH_USER` + `AUTH_PASS` (plain text, pas de hash bcrypt à générer). Les credentials sont stockés en secrets GitHub (`AUTH_USER`, `AUTH_PASS`) et transitent en base64 jusqu'à la VPS pour éviter les corruptions shell. Le browser ouvre une popup de login au premier accès.
+  - On a essayé d'utiliser le middleware Basic Auth de Traefik mais il causait un panic Go sur la config — switch sur Express middleware plus simple et plus robuste. La frontend (`web/`) reste publique car elle ne contient aucun secret (juste le bundle JS).
 - **Rate limits par IP** (express-rate-limit) :
   - 20 sessions/h max (créations Anthropic = $$)
   - 30 messages/min max (par session)
