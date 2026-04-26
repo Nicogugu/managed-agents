@@ -24,6 +24,7 @@ services:
       WP_BASE_URL: ${WP_BASE_URL}
       WP_USER: ${WP_USER}
       WP_APP_PASSWORD: ${WP_APP_PASSWORD}
+      PUBLIC_BASE_URL: https://agent.${VPS_IP}.nip.io
       PORT: "3001"
       NODE_ENV: production
     labels:

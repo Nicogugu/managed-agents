@@ -1,7 +1,13 @@
 import express, { type Express } from "express";
 import cors from "cors";
 import { client, createSession } from "./anthropic.js";
-import { createPost, updatePost, type WpPostInput } from "./wordpress.js";
+import {
+  createPost,
+  updatePost,
+  listPosts,
+  getPost,
+  type WpPostInput,
+} from "./wordpress.js";
 
 export function createApp(): Express {
   const app = express();
@@ -104,6 +110,32 @@ export function createApp(): Express {
     } finally {
       clearInterval(heartbeat);
       if (!closed) res.end();
+    }
+  });
+
+  app.get("/api/wp/posts", async (req, res) => {
+    try {
+      const status = (req.query.status as string) || undefined;
+      const perPage = req.query.per_page
+        ? Number(req.query.per_page)
+        : undefined;
+      const search = (req.query.search as string) || undefined;
+      const posts = await listPosts({ status, per_page: perPage, search });
+      res.json({ posts });
+    } catch (err: any) {
+      console.error("[wp] list error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/wp/posts/:id", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const post = await getPost(id);
+      res.json(post);
+    } catch (err: any) {
+      console.error("[wp] get error:", err);
+      res.status(500).json({ error: err.message });
     }
   });
 

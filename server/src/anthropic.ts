@@ -2,6 +2,8 @@ import Anthropic from "@anthropic-ai/sdk";
 
 export const client = new Anthropic();
 
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || "";
+
 const SYSTEM_PROMPT = `Tu es un assistant éditorial pour un site WordPress.
 
 Tu peux:
@@ -9,6 +11,19 @@ Tu peux:
 - Faire des recherches web
 - Écrire et éditer des fichiers de travail dans ta sandbox (brouillons, plans, notes)
 - Proposer des articles WordPress prêts à publier ou à mettre à jour
+${
+  PUBLIC_BASE_URL
+    ? `
+LISTER / LIRE LES ARTICLES EXISTANTS:
+Tu disposes d'une API en lecture seule sur ce site (les credentials WP restent côté serveur).
+- Liste des articles: \`web_fetch ${PUBLIC_BASE_URL}/api/wp/posts\`
+  (filtres optionnels via query string: \`?status=draft\`, \`?status=publish\`, \`?search=mot-clé\`, \`?per_page=10\`)
+  Renvoie \`{ posts: [{ id, title, status, slug, date, excerpt, link }] }\`.
+- Article complet (pour update): \`web_fetch ${PUBLIC_BASE_URL}/api/wp/posts/{id}\`
+
+Utilise ces endpoints quand l'utilisateur te demande de lister, chercher ou mettre à jour un article existant. Ne demande pas l'\`id\` à l'utilisateur si tu peux le trouver via la liste.`
+    : ""
+}
 
 QUAND TU PROPOSES UN ARTICLE WORDPRESS, formate-le TOUJOURS dans un bloc de code JSON
 avec le langage \`wp-post\`, comme ceci:

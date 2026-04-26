@@ -57,6 +57,64 @@ async function resolveTagIds(tags: (number | string)[]): Promise<number[]> {
   return ids;
 }
 
+export type WpPostSummary = {
+  id: number;
+  title: string;
+  status: string;
+  slug: string;
+  date: string;
+  excerpt: string;
+  link: string;
+};
+
+export async function listPosts(opts: {
+  status?: string;
+  per_page?: number;
+  search?: string;
+} = {}): Promise<WpPostSummary[]> {
+  const params = new URLSearchParams();
+  params.set("status", opts.status || "any");
+  params.set("per_page", String(opts.per_page ?? 50));
+  if (opts.search) params.set("search", opts.search);
+  // _fields limite la taille de la réponse
+  params.set("_fields", "id,title,status,slug,date,excerpt,link");
+
+  const res = await fetch(`${baseUrl()}/wp-json/wp/v2/posts?${params}`, {
+    headers: { Authorization: authHeader() },
+  });
+  if (!res.ok) {
+    throw new Error(`WP list failed (${res.status}): ${await res.text()}`);
+  }
+  const raw = (await res.json()) as Array<{
+    id: number;
+    title: { rendered: string };
+    status: string;
+    slug: string;
+    date: string;
+    excerpt: { rendered: string };
+    link: string;
+  }>;
+  return raw.map((p) => ({
+    id: p.id,
+    title: p.title.rendered,
+    status: p.status,
+    slug: p.slug,
+    date: p.date,
+    excerpt: p.excerpt.rendered.replace(/<[^>]+>/g, "").trim(),
+    link: p.link,
+  }));
+}
+
+export async function getPost(id: number) {
+  const res = await fetch(`${baseUrl()}/wp-json/wp/v2/posts/${id}`, {
+    headers: { Authorization: authHeader() },
+  });
+  if (!res.ok) {
+    throw new Error(`WP get failed (${res.status}): ${await res.text()}`);
+  }
+  return res.json();
+}
+
 export async function createPost(input: WpPostInput) {
   const body: Record<string, unknown> = { ...input };
   if (input.tags) body.tags = await resolveTagIds(input.tags);
