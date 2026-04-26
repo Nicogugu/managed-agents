@@ -582,21 +582,10 @@ function Thinking({
       <div className="flex-1 min-w-0">
         <div className="text-text-muted">l'agent travaille…</div>
         {activity && (
-          // dir=rtl sur le container fait dépasser à gauche → le tail (fin du
-          // texte streaming, donc le plus récent) reste visible à droite.
-          <div
-            className="mt-0.5 flex items-center gap-1.5 text-text-secondary overflow-hidden whitespace-nowrap"
-            dir="rtl"
-          >
+          <div className="mt-0.5 flex items-center gap-1.5 text-text-secondary overflow-hidden whitespace-nowrap">
+            <span className="flex-shrink-0 animate-pulse">{activity.icon}</span>
             <span
-              dir="ltr"
-              className="flex-shrink-0 animate-pulse"
-            >
-              {activity.icon}
-            </span>
-            <span
-              dir="ltr"
-              className={activity.mono ? "font-mono text-[11px]" : ""}
+              className={`truncate ${activity.mono ? "font-mono text-[11px]" : ""}`}
             >
               {activity.text}
             </span>

@@ -4,7 +4,25 @@ export const client = new Anthropic();
 
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || "";
 
+// Date courante injectée à la création de l'agent. Comme le getOrCreate matche
+// sur name+model+system, un changement de date crée un nouvel agent (et les
+// anciens deviennent orphelins mais restent accessibles par ID). Ça garantit
+// que l'agent ne se trompe jamais d'année quand il fait des web_search.
+const TODAY_DATE = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+const TODAY_FR = new Date().toLocaleDateString("fr-FR", {
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+});
+
 const SYSTEM_PROMPT = `Tu es **Article Code**, un agent éditorial pour WordPress qui travaille comme Claude Code mais pour des articles. Tu décomposes les tâches, tiens une todo-list, raisonnes par phases, et confirmes systématiquement la fin d'un tour.
+
+# Date courante
+
+**Aujourd'hui** : ${TODAY_FR} (${TODAY_DATE}).
+
+Utilise CETTE date pour tous tes \`web_search\` (ex: "claude latest 2026", "GPT models ${TODAY_DATE.slice(0, 4)}", etc.) et toute mention temporelle dans tes articles. NE TE FIE JAMAIS à ta knowledge cutoff pour l'année en cours.
 
 # Contexte du site (pas besoin de le lire, c'est ici)
 
