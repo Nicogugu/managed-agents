@@ -26,6 +26,10 @@ export function useSession() {
   const [error, setError] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
   const currentAssistantId = useRef<string | null>(null);
+  // Suivi du dernier event id reçu, pour reconnecter manuellement quand le
+  // browser tue l'EventSource en arrière-plan (mobile en veille >2-3min)
+  const lastEventIdRef = useRef<number>(0);
+  const sessionIdRef = useRef<string | null>(null);
   // Queue de typewriter pour simuler du streaming token-par-token
   // (l'API Managed Agents v2 délivre agent.message d'un seul bloc)
   const typewriterQueue = useRef<string[]>([]);
@@ -34,6 +38,41 @@ export function useSession() {
   // sinon la ligne d'activité disparaît avant que tout le texte soit révélé.
   const pendingIdle = useRef(false);
 
+  function connect(id: string) {
+    esRef.current?.close();
+    const last = lastEventIdRef.current;
+    const url = last > 0
+      ? `/api/sessions/${id}/stream?last_event_id=${last}`
+      : `/api/sessions/${id}/stream`;
+    const es = new EventSource(url);
+    esRef.current = es;
+    es.onopen = () => {
+      setStatus((s) => (s === "connecting" ? "idle" : s));
+      setError(null);
+    };
+    es.onerror = () => {
+      // EventSource auto-reconnecte normalement ; on n'affiche l'erreur que
+      // si la connexion est vraiment fermée (cas mobile en veille longue)
+      if (es.readyState === EventSource.CLOSED) {
+        setError("Connexion au stream perdue");
+      }
+    };
+    es.onmessage = (ev) => {
+      // EventSource expose ev.lastEventId pour le dernier id "event id" reçu
+      if (ev.lastEventId) {
+        const n = parseInt(ev.lastEventId, 10);
+        if (n > 0) lastEventIdRef.current = n;
+      }
+      let data: ServerEvent;
+      try {
+        data = JSON.parse(ev.data);
+      } catch {
+        return;
+      }
+      handleEvent(data);
+    };
+  }
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -41,40 +80,36 @@ export function useSession() {
         const id = await createSession();
         if (cancelled) return;
         setSessionId(id);
-
-        const es = new EventSource(`/api/sessions/${id}/stream`);
-        esRef.current = es;
-
-        es.onopen = () => {
-          setStatus("idle");
-          setError(null);
-        };
-        es.onerror = () => {
-          // EventSource reconnecte automatiquement après chaque fin de turn agent
-          // (res.end côté serveur). On n'affiche l'erreur que si la connexion est
-          // vraiment fermée (readyState === CLOSED).
-          if (es.readyState === EventSource.CLOSED) {
-            setError("Connexion au stream perdue");
-          }
-        };
-
-        es.onmessage = (ev) => {
-          let data: ServerEvent;
-          try {
-            data = JSON.parse(ev.data);
-          } catch {
-            return;
-          }
-          handleEvent(data);
-        };
+        sessionIdRef.current = id;
+        connect(id);
       } catch (err: any) {
         setError(err.message);
       }
     })();
 
+    // Reconnexion proactive quand l'onglet redevient visible. Sur mobile, le
+    // browser tue souvent l'EventSource après quelques minutes en arrière-plan
+    // sans que l'auto-reconnect du browser réussisse. On force une reconnexion
+    // depuis le dernier event id connu.
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      const id = sessionIdRef.current;
+      const es = esRef.current;
+      if (!id) return;
+      if (!es || es.readyState === EventSource.CLOSED) {
+        connect(id);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    window.addEventListener("pageshow", onVisible);
+
     return () => {
       cancelled = true;
       esRef.current?.close();
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+      window.removeEventListener("pageshow", onVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

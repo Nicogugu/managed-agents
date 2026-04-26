@@ -160,7 +160,11 @@ export function createApp(): Express {
       res.write(": ping\n\n");
     }, 15000);
 
-    const lastIdHeader = req.headers["last-event-id"];
+    // Last-Event-ID peut venir du header (auto-injecté par EventSource sur reconnect)
+    // ou d'un query param ?last_event_id=N (utilisé quand on recrée manuellement
+    // l'EventSource après que le browser ait tué la connexion en arrière-plan).
+    const lastIdHeader =
+      req.headers["last-event-id"] || (req.query.last_event_id as string);
     const lastEventId = lastIdHeader
       ? parseInt(String(lastIdHeader), 10) || 0
       : 0;

@@ -211,30 +211,9 @@ export function App() {
               disabled={status === "running"}
             />
           ))}
-          {status === "running" && <Thinking />}
+          {status === "running" && <Thinking activity={activity} />}
         </div>
       </main>
-
-      {activity && (
-        <div className="border-t border-border bg-bg-elevated px-4 sm:px-6 py-2 flex items-center gap-2 text-sm text-text-secondary">
-          <span className="animate-pulse flex-shrink-0">{activity.icon}</span>
-          {/* dir="rtl" sur le container fait dépasser à GAUCHE quand le contenu
-              est trop long, donc les derniers caractères (le tail streaming)
-              restent visibles à droite. Le span enfant en dir="ltr" garde la
-              lecture du français normale. */}
-          <div
-            className="flex-1 min-w-0 overflow-hidden whitespace-nowrap"
-            dir="rtl"
-          >
-            <span
-              dir="ltr"
-              className={activity.mono ? "font-mono text-xs" : ""}
-            >
-              {activity.text}
-            </span>
-          </div>
-        </div>
-      )}
 
       <footer className="border-t border-border bg-bg-primary">
         <div className="max-w-3xl mx-auto p-3 sm:p-4">
@@ -476,10 +455,14 @@ function EmptyState({
   );
 }
 
-function Thinking() {
+function Thinking({
+  activity,
+}: {
+  activity: { icon: string; text: string; mono?: boolean } | null;
+}) {
   return (
-    <div className="flex items-center gap-2 text-xs text-text-muted px-1 py-1">
-      <div className="flex gap-1">
+    <div className="flex items-start gap-2 text-xs text-text-muted px-1 py-2">
+      <div className="flex gap-1 mt-1.5 flex-shrink-0">
         {[0, 150, 300].map((d) => (
           <span
             key={d}
@@ -488,7 +471,30 @@ function Thinking() {
           />
         ))}
       </div>
-      <span>l'agent travaille…</span>
+      <div className="flex-1 min-w-0">
+        <div className="text-text-muted">l'agent travaille…</div>
+        {activity && (
+          // dir=rtl sur le container fait dépasser à gauche → le tail (fin du
+          // texte streaming, donc le plus récent) reste visible à droite.
+          <div
+            className="mt-0.5 flex items-center gap-1.5 text-text-secondary overflow-hidden whitespace-nowrap"
+            dir="rtl"
+          >
+            <span
+              dir="ltr"
+              className="flex-shrink-0 animate-pulse"
+            >
+              {activity.icon}
+            </span>
+            <span
+              dir="ltr"
+              className={activity.mono ? "font-mono text-[11px]" : ""}
+            >
+              {activity.text}
+            </span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
