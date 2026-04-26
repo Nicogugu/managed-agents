@@ -44,15 +44,25 @@ jobs:
           VPS_IP: ${{ secrets.VPS_IP }}
           EDITOR_AUTH_USERS: ${{ secrets.EDITOR_AUTH_USERS }}
         run: |
+          # On encode toutes les valeurs en base64 avant ssh pour éviter que
+          # le shell remote n'expande des sous-strings qui ressemblent à des
+          # variables (ex: \$2y\$05\$ d'un bcrypt hash devient \$0=bash + \$2,
+          # \$5 unset → "ybash5/..."). Le décodage sur la VPS est safe.
+          B64_ANTHROPIC=$(printf %s "$ANTHROPIC_API_KEY" | base64 -w0)
+          B64_WP_BASE=$(printf %s "$WP_BASE_URL" | base64 -w0)
+          B64_WP_USER=$(printf %s "$WP_USER_LOGIN" | base64 -w0)
+          B64_WP_PASS=$(printf %s "$WP_APP_PASSWORD" | base64 -w0)
+          B64_GEMINI=$(printf %s "$GEMINI_API_KEY" | base64 -w0)
+          B64_AUTH=$(printf %s "$EDITOR_AUTH_USERS" | base64 -w0)
           ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 \
             "$VPS_USER@$VPS_HOST" \
-            ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
-            WP_BASE_URL="$WP_BASE_URL" \
-            WP_USER_LOGIN="$WP_USER_LOGIN" \
-            WP_APP_PASSWORD="$WP_APP_PASSWORD" \
-            GEMINI_API_KEY="$GEMINI_API_KEY" \
+            B64_ANTHROPIC="$B64_ANTHROPIC" \
+            B64_WP_BASE="$B64_WP_BASE" \
+            B64_WP_USER="$B64_WP_USER" \
+            B64_WP_PASS="$B64_WP_PASS" \
+            B64_GEMINI="$B64_GEMINI" \
+            B64_AUTH="$B64_AUTH" \
             VPS_IP="$VPS_IP" \
-            EDITOR_AUTH_USERS="$EDITOR_AUTH_USERS" \
             BRANCH="$BRANCH" \
             bash -se <<'EOF'
           set -euo pipefail
@@ -66,17 +76,19 @@ jobs:
           # remote interprète des séquences spéciales (notamment \$\$ comme PID
           # de bash) dans les valeurs contenant des dollars (bcrypt hash etc).
           umask 077
+          # Décode les valeurs base64 et écrit le .env en literal
           : > .env
-          printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY" >> .env
-          printf 'WP_BASE_URL=%s\n' "$WP_BASE_URL" >> .env
-          printf 'WP_USER=%s\n' "$WP_USER_LOGIN" >> .env
-          printf 'WP_APP_PASSWORD=%s\n' "$WP_APP_PASSWORD" >> .env
-          printf 'GEMINI_API_KEY=%s\n' "$GEMINI_API_KEY" >> .env
+          printf 'ANTHROPIC_API_KEY=%s\n' "$(echo "$B64_ANTHROPIC" | base64 -d)" >> .env
+          printf 'WP_BASE_URL=%s\n' "$(echo "$B64_WP_BASE" | base64 -d)" >> .env
+          printf 'WP_USER=%s\n' "$(echo "$B64_WP_USER" | base64 -d)" >> .env
+          printf 'WP_APP_PASSWORD=%s\n' "$(echo "$B64_WP_PASS" | base64 -d)" >> .env
+          printf 'GEMINI_API_KEY=%s\n' "$(echo "$B64_GEMINI" | base64 -d)" >> .env
           printf 'VPS_IP=%s\n' "$VPS_IP" >> .env
-          # EDITOR_AUTH_USERS arrive en single-\$ (le secret est stocké tel quel).
-          # Docker compose interprète \$ comme variable substitution, donc on
-          # double les \$ AVANT d'écrire dans .env. Bash parameter expansion:
-          AUTH_ESCAPED="${EDITOR_AUTH_USERS//\$/\$\$}"
+          # EDITOR_AUTH_USERS arrive en single-\$ (secret stocké tel quel).
+          # Docker compose interprète \$ comme variable, donc on double les \$
+          # avant écriture dans .env via bash parameter expansion.
+          AUTH_RAW=$(echo "$B64_AUTH" | base64 -d)
+          AUTH_ESCAPED="${AUTH_RAW//\$/\$\$}"
           printf 'EDITOR_AUTH_USERS=%s\n' "$AUTH_ESCAPED" >> .env
           docker compose -f docker-compose.local.yml --env-file .env up -d --build
           echo "→ Status:"
