@@ -18,6 +18,8 @@ export function App() {
   const [input, setInput] = useState("");
   const [todosOpen, setTodosOpen] = useState(false);
   const [textInputOpen, setTextInputOpen] = useState(false);
+  // Pour chaque ask cliqué (clé = "messageId#askIdx"), on stocke le label choisi
+  const [askAnswered, setAskAnswered] = useState<Record<string, string>>({});
   // Todos courantes = dernier checklist non-vide trouvé dans un message assistant
   const todos = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -155,6 +157,12 @@ export function App() {
     }
   }
 
+  async function answerAsk(askKey: string, label: string, value: string) {
+    if (askAnswered[askKey]) return; // déjà répondu
+    setAskAnswered((prev) => ({ ...prev, [askKey]: label }));
+    await sendClick(label, value);
+  }
+
   return (
     <div className="h-full flex flex-col bg-bg-primary text-text-primary">
       <Header
@@ -195,7 +203,10 @@ export function App() {
               message={m}
               mode={mode}
               onPublish={(draft) => setPendingDraft(draft)}
-              onClickAsk={sendClick}
+              onAnswerAsk={(askIdx, label, value) =>
+                answerAsk(`${m.id}#${askIdx}`, label, value)
+              }
+              askAnsweredFor={(askIdx) => askAnswered[`${m.id}#${askIdx}`]}
               onApprovePlan={() => sendClick("✓ vasy", "vasy")}
               disabled={status === "running"}
             />
@@ -479,14 +490,16 @@ function MessageBubble({
   message,
   mode,
   onPublish,
-  onClickAsk,
+  onAnswerAsk,
+  askAnsweredFor,
   onApprovePlan,
   disabled,
 }: {
   message: ChatMessage;
   mode: Mode;
   onPublish: (draft: WpDraft) => void;
-  onClickAsk: (label: string, value: string) => void;
+  onAnswerAsk: (askIdx: number, label: string, value: string) => void;
+  askAnsweredFor: (askIdx: number) => string | undefined;
   onApprovePlan: () => void;
   disabled: boolean;
 }) {
@@ -535,7 +548,13 @@ function MessageBubble({
       ))}
 
       {asks.map((ask, i) => (
-        <AskCard key={`ask-${i}`} ask={ask} onClick={onClickAsk} disabled={disabled} />
+        <AskCard
+          key={`ask-${i}`}
+          ask={ask}
+          onClick={(label, value) => onAnswerAsk(i, label, value)}
+          answered={askAnsweredFor(i)}
+          disabled={disabled}
+        />
       ))}
     </div>
   );
@@ -544,12 +563,26 @@ function MessageBubble({
 function AskCard({
   ask,
   onClick,
+  answered,
   disabled,
 }: {
   ask: WpAsk;
   onClick: (label: string, value: string) => void;
+  answered?: string;
   disabled: boolean;
 }) {
+  // Cas répondu: on collapse en une seule ligne récap
+  if (answered) {
+    return (
+      <div className="surface rounded-lg px-3 py-2 bg-bg-tertiary/40 border-border flex items-center gap-2 text-sm">
+        <span className="text-emerald-500 flex-shrink-0">✓</span>
+        {ask.question && (
+          <span className="text-text-muted flex-shrink-0">{ask.question}</span>
+        )}
+        <span className="text-text-primary font-medium truncate">{answered}</span>
+      </div>
+    );
+  }
   return (
     <div className="surface rounded-xl p-3 sm:p-4 bg-accent-subtle border-accent/20">
       {ask.question && (
