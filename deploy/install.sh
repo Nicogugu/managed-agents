@@ -22,6 +22,8 @@ require WP_BASE_URL
 require WP_USER
 require WP_APP_PASSWORD
 require VPS_IP
+# GEMINI_API_KEY est optionnelle (image gen désactivé sans elle)
+GEMINI_API_KEY="${GEMINI_API_KEY:-}"
 
 echo "→ Clone $REPO_URL ($BRANCH) dans $DEST"
 if [[ -d "$DEST/.git" ]]; then
@@ -40,6 +42,7 @@ ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
 WP_BASE_URL=$WP_BASE_URL
 WP_USER=$WP_USER
 WP_APP_PASSWORD=$WP_APP_PASSWORD
+GEMINI_API_KEY=$GEMINI_API_KEY
 VPS_IP=$VPS_IP
 EOF
 chmod 600 .env

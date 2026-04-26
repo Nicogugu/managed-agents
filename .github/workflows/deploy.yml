@@ -36,16 +36,41 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_HOST: ${{ secrets.VPS_HOST }}
           BRANCH: ${{ github.ref_name }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          WP_BASE_URL: ${{ secrets.WP_BASE_URL }}
+          WP_USER_LOGIN: ${{ secrets.WP_USER_LOGIN }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          VPS_IP: ${{ secrets.VPS_IP }}
         run: |
-          # -v pour debug auth si la clé n'est pas acceptée
-          ssh -v -o StrictHostKeyChecking=no -o BatchMode=yes -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 \
-            "$VPS_USER@$VPS_HOST" bash -se <<EOF
+          ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 \
+            "$VPS_USER@$VPS_HOST" \
+            ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+            WP_BASE_URL="$WP_BASE_URL" \
+            WP_USER_LOGIN="$WP_USER_LOGIN" \
+            WP_APP_PASSWORD="$WP_APP_PASSWORD" \
+            GEMINI_API_KEY="$GEMINI_API_KEY" \
+            VPS_IP="$VPS_IP" \
+            BRANCH="$BRANCH" \
+            bash -se <<'EOF'
           set -euo pipefail
           cd /opt/managed-agents
           git fetch origin "$BRANCH"
           git checkout "$BRANCH"
           git reset --hard "origin/$BRANCH"
           cd deploy
+          # Réécriture du .env depuis les secrets CI pour rester reproductible
+          umask 077
+          cat > .env <<ENVEOF
+          ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
+          WP_BASE_URL=$WP_BASE_URL
+          WP_USER=$WP_USER_LOGIN
+          WP_APP_PASSWORD=$WP_APP_PASSWORD
+          GEMINI_API_KEY=$GEMINI_API_KEY
+          VPS_IP=$VPS_IP
+          ENVEOF
+          # Heredoc indentation: virer les espaces de tête
+          sed -i 's/^[[:space:]]\+//' .env
           docker compose -f docker-compose.local.yml --env-file .env up -d --build
           echo "→ Status:"
           docker compose -f docker-compose.local.yml ps

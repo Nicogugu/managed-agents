@@ -1,15 +1,30 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "./useSession";
 import { sendMessage, publishDraft, fetchHealth } from "./api";
-import { extractDrafts, stripDraftFences } from "./parseDraft";
+import {
+  extractDrafts,
+  extractPlans,
+  extractTodos,
+  stripBlocks,
+} from "./parseDraft";
 import { PublishModal } from "./PublishModal";
-import type { ChatMessage, Mode, WpDraft } from "./types";
+import type { ChatMessage, Mode, TodoItem, WpDraft, WpPlan } from "./types";
 
 type Health = { ok: boolean; anthropicKey: boolean; wpConfigured: boolean };
 
 export function App() {
   const { sessionId, messages, status, error, appendUserMessage } = useSession();
   const [input, setInput] = useState("");
+  // Todos courantes = dernier checklist non-vide trouvé dans un message assistant
+  const todos = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role !== "assistant") continue;
+      const t = extractTodos(m.text);
+      if (t.length > 0) return t;
+    }
+    return [];
+  }, [messages]);
   const [mode, setMode] = useState<Mode>("validate");
   const [pendingDraft, setPendingDraft] = useState<WpDraft | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -85,6 +100,7 @@ export function App() {
 
       <main ref={scrollRef} className="flex-1 overflow-auto">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-3">
+          {todos.length > 0 && <TodosPanel todos={todos} />}
           {error && (
             <div className="surface border-red-500/40 bg-red-500/10 text-red-300 text-sm rounded-md p-3">
               {error}
@@ -307,7 +323,8 @@ function MessageBubble({
   }
 
   const drafts = useMemo(() => extractDrafts(message.text), [message.text]);
-  const visibleText = useMemo(() => stripDraftFences(message.text), [message.text]);
+  const plans = useMemo(() => extractPlans(message.text), [message.text]);
+  const visibleText = useMemo(() => stripBlocks(message.text), [message.text]);
 
   return (
     <div className="flex flex-col gap-2 max-w-[92%] sm:max-w-[85%]">
@@ -325,6 +342,10 @@ function MessageBubble({
         </div>
       )}
 
+      {plans.map((plan, i) => (
+        <PlanCard key={`plan-${i}`} plan={plan} />
+      ))}
+
       {drafts.map((draft, i) => (
         <DraftCard
           key={i}
@@ -333,6 +354,108 @@ function MessageBubble({
           onPublish={() => onPublish(draft)}
         />
       ))}
+    </div>
+  );
+}
+
+function PlanCard({ plan }: { plan: WpPlan }) {
+  return (
+    <div className="surface rounded-xl p-3 sm:p-4 border-amber-500/30 bg-amber-500/5">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="pill !text-amber-300 !border-amber-500/40 !bg-amber-500/10 uppercase tracking-wide">
+          📋 brief
+        </span>
+        {plan.wordCount && (
+          <span className="pill text-text-tertiary">~{plan.wordCount} mots</span>
+        )}
+      </div>
+      {plan.title && (
+        <div className="font-semibold text-text-primary text-md mb-1">{plan.title}</div>
+      )}
+      {plan.slug && (
+        <div className="text-xs font-mono text-text-muted mb-2">/{plan.slug}</div>
+      )}
+      {plan.outline && plan.outline.length > 0 && (
+        <ul className="text-sm text-text-secondary list-disc list-inside space-y-0.5 mb-2">
+          {plan.outline.map((h, i) => (
+            <li key={i}>{h}</li>
+          ))}
+        </ul>
+      )}
+      <div className="flex flex-wrap gap-1 mb-2">
+        {plan.category && (
+          <span className="pill text-text-tertiary">📁 {plan.category}</span>
+        )}
+        {(plan.tags || []).map((t) => (
+          <span key={t} className="pill text-text-tertiary">#{t}</span>
+        ))}
+      </div>
+      {plan.image?.needed && plan.image.prompt && (
+        <div className="text-xs text-text-tertiary mt-2 border-t border-border pt-2">
+          🎨 <span className="font-mono">{plan.image.prompt}</span>
+        </div>
+      )}
+      {plan.sources && plan.sources.length > 0 && (
+        <details className="mt-2 text-xs">
+          <summary className="text-text-muted cursor-pointer">{plan.sources.length} source(s)</summary>
+          <ul className="mt-1 space-y-0.5 text-text-tertiary">
+            {plan.sources.map((s, i) => (
+              <li key={i} className="truncate">
+                <a href={s} target="_blank" rel="noreferrer" className="hover:text-accent">
+                  {s}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      <div className="text-xs text-text-muted mt-2">
+        Réponds <kbd className="font-mono px-1 bg-bg-tertiary rounded">vasy</kbd> pour valider
+        et passer en DRAFT.
+      </div>
+    </div>
+  );
+}
+
+function TodosPanel({ todos }: { todos: TodoItem[] }) {
+  if (todos.length === 0) return null;
+  const done = todos.filter((t) => t.status === "done").length;
+  return (
+    <div className="surface rounded-lg p-3 sticky top-14 max-h-[40vh] overflow-auto">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
+          Todos
+        </span>
+        <span className="text-xs text-text-muted">
+          {done}/{todos.length}
+        </span>
+      </div>
+      <ul className="space-y-1">
+        {todos.map((t, i) => (
+          <li key={i} className="flex items-start gap-2 text-sm">
+            <span className="mt-0.5 flex-shrink-0">
+              {t.status === "done" ? (
+                <span className="text-emerald-500">✓</span>
+              ) : t.status === "in_progress" ? (
+                <span className="text-amber-400 animate-pulse">▸</span>
+              ) : (
+                <span className="text-text-muted">○</span>
+              )}
+            </span>
+            <span
+              className={
+                t.status === "done"
+                  ? "text-text-muted line-through"
+                  : t.status === "in_progress"
+                  ? "text-text-primary font-medium"
+                  : "text-text-secondary"
+              }
+            >
+              {t.text}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

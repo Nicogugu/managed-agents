@@ -24,6 +24,8 @@ services:
       WP_BASE_URL: ${WP_BASE_URL}
       WP_USER: ${WP_USER}
       WP_APP_PASSWORD: ${WP_APP_PASSWORD}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_IMAGE_MODEL: ${GEMINI_IMAGE_MODEL:-gemini-3.1-flash-image-preview}
       PUBLIC_BASE_URL: https://agent.${VPS_IP}.nip.io
       PORT: "3001"
       NODE_ENV: production

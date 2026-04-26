@@ -115,6 +115,102 @@ export async function getPost(id: number) {
   return res.json();
 }
 
+export type WpTaxonomyItem = { id: number; name: string; slug: string; count: number };
+
+export async function listCategories(): Promise<WpTaxonomyItem[]> {
+  const res = await fetch(
+    `${baseUrl()}/wp-json/wp/v2/categories?per_page=100&_fields=id,name,slug,count`,
+    { headers: { Authorization: authHeader() } },
+  );
+  if (!res.ok) throw new Error(`WP categories failed (${res.status}): ${await res.text()}`);
+  return res.json();
+}
+
+export async function listTags(search?: string): Promise<WpTaxonomyItem[]> {
+  const params = new URLSearchParams({
+    per_page: "50",
+    _fields: "id,name,slug,count",
+    orderby: "count",
+    order: "desc",
+  });
+  if (search) params.set("search", search);
+  const res = await fetch(`${baseUrl()}/wp-json/wp/v2/tags?${params}`, {
+    headers: { Authorization: authHeader() },
+  });
+  if (!res.ok) throw new Error(`WP tags failed (${res.status}): ${await res.text()}`);
+  return res.json();
+}
+
+export type WpMediaItem = {
+  id: number;
+  source_url: string;
+  alt_text: string;
+  title: string;
+  date: string;
+  mime_type: string;
+};
+
+export async function listMedia(perPage = 20): Promise<WpMediaItem[]> {
+  const res = await fetch(
+    `${baseUrl()}/wp-json/wp/v2/media?per_page=${perPage}&_fields=id,source_url,alt_text,title,date,mime_type`,
+    { headers: { Authorization: authHeader() } },
+  );
+  if (!res.ok) throw new Error(`WP media failed (${res.status}): ${await res.text()}`);
+  const raw = (await res.json()) as Array<any>;
+  return raw.map((m) => ({
+    id: m.id,
+    source_url: m.source_url,
+    alt_text: m.alt_text || "",
+    title: m.title?.rendered || "",
+    date: m.date,
+    mime_type: m.mime_type,
+  }));
+}
+
+export async function uploadMedia(opts: {
+  data: Buffer;
+  filename: string;
+  mimeType: string;
+  altText?: string;
+  title?: string;
+}): Promise<WpMediaItem> {
+  const res = await fetch(`${baseUrl()}/wp-json/wp/v2/media`, {
+    method: "POST",
+    headers: {
+      Authorization: authHeader(),
+      "Content-Type": opts.mimeType,
+      "Content-Disposition": `attachment; filename="${opts.filename}"`,
+    },
+    // Buffer -> Uint8Array pour compat fetch (BodyInit n'accepte pas Buffer en TS strict)
+    body: new Uint8Array(opts.data),
+  });
+  if (!res.ok) throw new Error(`WP media upload failed (${res.status}): ${await res.text()}`);
+  const created = (await res.json()) as any;
+
+  // Optionnel: enrichir avec alt text + title via PUT (l'upload initial accepte pas tous les champs)
+  if (opts.altText || opts.title) {
+    await fetch(`${baseUrl()}/wp-json/wp/v2/media/${created.id}`, {
+      method: "POST",
+      headers: {
+        Authorization: authHeader(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        alt_text: opts.altText,
+        title: opts.title,
+      }),
+    });
+  }
+  return {
+    id: created.id,
+    source_url: created.source_url,
+    alt_text: opts.altText || "",
+    title: opts.title || created.title?.rendered || "",
+    date: created.date,
+    mime_type: created.mime_type,
+  };
+}
+
 export async function createPost(input: WpPostInput) {
   const body: Record<string, unknown> = { ...input };
   if (input.tags) body.tags = await resolveTagIds(input.tags);

@@ -18,6 +18,25 @@ export type WpDraft = {
   slug?: string;
   categories?: number[];
   tags?: (number | string)[];
+  featured_media?: number;
+};
+
+export type WpPlan = {
+  title?: string;
+  slug?: string;
+  outline?: string[];
+  category?: string;
+  tags?: string[];
+  image?: { needed?: boolean; prompt?: string };
+  wordCount?: number;
+  internalLinks?: Array<{ id: number; anchor?: string }>;
+  sources?: string[];
+  [k: string]: any;
+};
+
+export type TodoItem = {
+  status: "pending" | "in_progress" | "done";
+  text: string;
 };
 
 export type Mode = "validate" | "auto";

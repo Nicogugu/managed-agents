@@ -6,8 +6,13 @@ import {
   updatePost,
   listPosts,
   getPost,
+  listCategories,
+  listTags,
+  listMedia,
+  uploadMedia,
   type WpPostInput,
 } from "./wordpress.js";
+import { generateImage, slugifyForFilename } from "./nanobanana.js";
 
 export function createApp(): Express {
   const app = express();
@@ -135,6 +140,70 @@ export function createApp(): Express {
       res.json(post);
     } catch (err: any) {
       console.error("[wp] get error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/wp/categories", async (_req, res) => {
+    try {
+      res.json({ categories: await listCategories() });
+    } catch (err: any) {
+      console.error("[wp] categories error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/wp/tags", async (req, res) => {
+    try {
+      const search = (req.query.search as string) || undefined;
+      res.json({ tags: await listTags(search) });
+    } catch (err: any) {
+      console.error("[wp] tags error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/wp/media", async (req, res) => {
+    try {
+      const perPage = req.query.per_page ? Number(req.query.per_page) : 20;
+      res.json({ media: await listMedia(perPage) });
+    } catch (err: any) {
+      console.error("[wp] media error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Image generation: prompt -> Nano Banana -> upload WP Media -> renvoie {id, url}
+  app.post("/api/image", async (req, res) => {
+    try {
+      const prompt = (req.body?.prompt as string)?.trim();
+      const altText = (req.body?.alt_text as string) || "";
+      const title = (req.body?.title as string) || "";
+      const aspectRatio = req.body?.aspect_ratio as any;
+      const imageSize = req.body?.image_size as any;
+      if (!prompt) return res.status(400).json({ error: "prompt required" });
+
+      console.log(`[image] generate "${prompt.slice(0, 80)}..."`);
+      const img = await generateImage({ prompt, aspectRatio, imageSize });
+      const ext = img.mimeType === "image/jpeg" ? "jpg" : "png";
+      const filename = `${slugifyForFilename(title || prompt) || "agent-image"}.${ext}`;
+
+      const media = await uploadMedia({
+        data: img.data,
+        filename,
+        mimeType: img.mimeType,
+        altText: altText || prompt.slice(0, 200),
+        title: title || filename.replace(/\.[^.]+$/, ""),
+      });
+      console.log(`[image] uploaded media ${media.id} ${media.source_url}`);
+      res.json({
+        id: media.id,
+        url: media.source_url,
+        alt_text: media.alt_text,
+        mime_type: media.mime_type,
+      });
+    } catch (err: any) {
+      console.error("[image] error:", err);
       res.status(500).json({ error: err.message });
     }
   });
