@@ -103,7 +103,13 @@ export function App() {
     if (typeof localStorage !== "undefined") localStorage.setItem("mode", mode);
   }, [mode]);
   const [pendingDraft, setPendingDraft] = useState<WpDraft | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  // Toast peut être un texte simple ou un objet avec un lien cliquable
+  const [toast, setToast] = useState<{ text: string; link?: string } | null>(null);
+  // Map "messageId#draftIdx" → { id, link } pour afficher le lien cliquable
+  // dans la DraftCard une fois l'article publié.
+  const [publishedDrafts, setPublishedDrafts] = useState<
+    Record<string, { id: number; link: string }>
+  >({});
   const [health, setHealth] = useState<Health | null>(null);
   const handledDrafts = useRef<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -123,14 +129,21 @@ export function App() {
         const key = `${m.id}#${i}`;
         if (handledDrafts.current.has(key)) continue;
         handledDrafts.current.add(key);
-        // En mode auto on force status: "publish" — l'agent peut avoir mis "draft"
+        const isUpdate = drafts[i].action === "update";
         publishDraft({ ...drafts[i], status: "publish" })
-          .then((post) =>
-            setToast(
-              `${drafts[i].action === "create" ? "Publié" : "Mis à jour"} · ${post.link || `#${post.id}`}`,
-            ),
-          )
-          .catch((err) => setToast(`Erreur · ${err.message}`));
+          .then((post: any) => {
+            setPublishedDrafts((prev) => ({
+              ...prev,
+              [key]: { id: post.id, link: post.link },
+            }));
+            setToast({
+              text: `${isUpdate ? "Mis à jour" : "Publié"} · ${
+                drafts[i].title?.slice(0, 50) || `#${post.id}`
+              }`,
+              link: post.link,
+            });
+          })
+          .catch((err) => setToast({ text: `Erreur · ${err.message}` }));
       }
     }
   }, [messages, mode]);
@@ -161,7 +174,7 @@ export function App() {
     try {
       await sendMessage(sessionId, text);
     } catch (err: any) {
-      setToast(`Erreur · ${err.message}`);
+      setToast({ text: `Erreur · ${err.message}` });
     }
   }
 
@@ -171,7 +184,7 @@ export function App() {
     try {
       await sendMessage(sessionId, value);
     } catch (err: any) {
-      setToast(`Erreur · ${err.message}`);
+      setToast({ text: `Erreur · ${err.message}` });
     }
   }
 
@@ -235,6 +248,7 @@ export function App() {
                 answerAsk(`${m.id}#${askIdx}`, label, value)
               }
               askAnsweredFor={(askIdx) => askAnswered[`${m.id}#${askIdx}`]}
+              publishedFor={(draftIdx) => publishedDrafts[`${m.id}#${draftIdx}`]}
               onApprovePlan={() => sendClick("✓ vasy", "vasy")}
               disabled={status === "running"}
             />
@@ -316,14 +330,51 @@ export function App() {
           onClose={() => setPendingDraft(null)}
           onPublished={(post) => {
             setPendingDraft(null);
-            setToast(`Publié · ${post.link || `#${post.id}`}`);
+            setToast({
+              text: `Publié · ${pendingDraft.title?.slice(0, 50) || `#${post.id}`}`,
+              link: post.link,
+            });
+            // Trouve la draft card pour la mettre à jour avec le lien.
+            // On match par draft (titre+slug) — heuristique simple mais ok
+            // pour le mode validation où l'utilisateur clique sur UN draft.
+            for (let mi = messages.length - 1; mi >= 0; mi--) {
+              const m = messages[mi];
+              if (m.role !== "assistant") continue;
+              const drafts = extractDrafts(assistantText(m));
+              for (let di = 0; di < drafts.length; di++) {
+                if (
+                  drafts[di].title === pendingDraft.title &&
+                  drafts[di].slug === pendingDraft.slug
+                ) {
+                  setPublishedDrafts((prev) => ({
+                    ...prev,
+                    [`${m.id}#${di}`]: { id: post.id, link: post.link },
+                  }));
+                  return;
+                }
+              }
+            }
           }}
         />
       )}
 
       {toast && (
         <div className="fixed bottom-4 right-4 surface rounded-lg shadow-elevated text-sm px-4 py-2.5 max-w-sm animate-[fadeIn_120ms_ease-out]">
-          {toast}
+          {toast.link ? (
+            <a
+              href={toast.link}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-text-primary hover:text-accent inline-flex items-center gap-1.5"
+            >
+              <span>{toast.text}</span>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="flex-shrink-0">
+                <path d="M14 3h7v7" /><path d="M10 14L21 3" /><path d="M21 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h6" />
+              </svg>
+            </a>
+          ) : (
+            toast.text
+          )}
         </div>
       )}
     </div>
@@ -544,6 +595,7 @@ function MessageBubble({
   onPublish,
   onAnswerAsk,
   askAnsweredFor,
+  publishedFor,
   onApprovePlan,
   disabled,
 }: {
@@ -552,6 +604,7 @@ function MessageBubble({
   onPublish: (draft: WpDraft) => void;
   onAnswerAsk: (askIdx: number, label: string, value: string) => void;
   askAnsweredFor: (askIdx: number) => string | undefined;
+  publishedFor: (draftIdx: number) => { id: number; link: string } | undefined;
   onApprovePlan: () => void;
   disabled: boolean;
 }) {
@@ -622,6 +675,7 @@ function MessageBubble({
               draft={draft}
               mode={mode}
               onPublish={() => onPublish(draft)}
+              published={publishedFor(idx)}
             />,
           );
         }
@@ -1008,11 +1062,34 @@ function DraftCard({
   draft,
   mode,
   onPublish,
+  published,
 }: {
   draft: WpDraft;
   mode: Mode;
   onPublish: () => void;
+  published?: { id: number; link: string };
 }) {
+  // Quand l'article est publié et qu'on a un lien, le titre devient un lien
+  // cliquable target=_blank vers l'article live.
+  const titleEl =
+    published?.link ? (
+      <a
+        href={published.link}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-semibold text-accent text-md truncate hover:underline inline-flex items-center gap-1"
+      >
+        {draft.title || "(sans titre)"}
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="flex-shrink-0">
+          <path d="M14 3h7v7" /><path d="M10 14L21 3" /><path d="M21 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h6" />
+        </svg>
+      </a>
+    ) : (
+      <div className="font-semibold text-text-primary text-md truncate">
+        {draft.title || "(sans titre)"}
+      </div>
+    );
+
   return (
     <div className="surface rounded-xl p-3 sm:p-4 border-accent/20 bg-accent-subtle">
       <div className="flex items-start justify-between gap-3 mb-2">
@@ -1021,24 +1098,37 @@ function DraftCard({
             <span className="pill pill-running !text-accent !bg-accent-subtle !border-accent/40 uppercase tracking-wide">
               {draft.action === "create" ? "nouveau" : `update #${draft.id}`}
             </span>
-            {draft.status && (
+            {published ? (
+              <span className="pill !text-emerald-400 !border-emerald-500/40 !bg-emerald-500/10 uppercase tracking-wide">
+                ✓ publié #{published.id}
+              </span>
+            ) : draft.status ? (
               <span className="pill text-text-tertiary uppercase tracking-wide">{draft.status}</span>
-            )}
+            ) : null}
           </div>
-          <div className="font-semibold text-text-primary text-md truncate">
-            {draft.title || "(sans titre)"}
-          </div>
+          {titleEl}
           {draft.excerpt && (
             <div className="text-sm text-text-secondary mt-1 line-clamp-2">
               {draft.excerpt}
             </div>
           )}
+          {published?.link && (
+            <a
+              href={published.link}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block text-xs text-accent hover:underline mt-2 truncate font-mono"
+            >
+              {published.link}
+            </a>
+          )}
         </div>
-        {mode === "validate" ? (
+        {!published && mode === "validate" && (
           <button onClick={onPublish} className="btn-primary flex-shrink-0">
             Publier
           </button>
-        ) : (
+        )}
+        {!published && mode === "auto" && (
           <span className="text-xs text-text-tertiary self-center flex-shrink-0">auto…</span>
         )}
       </div>

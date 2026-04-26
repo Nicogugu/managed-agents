@@ -36,6 +36,10 @@ export function useSession() {
   // (l'API Managed Agents v2 délivre agent.message d'un seul bloc)
   const typewriterQueue = useRef<string[]>([]);
   const typewriterRunning = useRef(false);
+  // Cancel handler du tick en cours — appelé quand un event non-texte arrive
+  // pendant qu'on stream du texte, pour finir la révélation instantanément
+  // avant d'ajouter le tool block (sinon le markdown se split entre 2 blocs).
+  const typewriterFlushNow = useRef<(() => void) | null>(null);
   // status_idle est différé tant que le typewriter n'a pas vidé sa queue,
   // sinon la ligne d'activité disparaît avant que tout le texte soit révélé.
   const pendingIdle = useRef(false);
@@ -177,7 +181,13 @@ export function useSession() {
       case "agent.custom_tool_use": {
         const name = (ev as any).name || (ev as any).tool_use?.name;
         const input = (ev as any).input || (ev as any).tool_use?.input;
-        if (name) appendToolCall(name, input);
+        if (name) {
+          // Avant d'insérer un tool block, on finit la révélation de texte
+          // en cours pour éviter que le markdown du block texte courant soit
+          // splitté en deux quand on append le block tool puis du texte après.
+          flushTypewriter();
+          appendToolCall(name, input);
+        }
         break;
       }
       case "agent.tool_result":
@@ -217,7 +227,7 @@ export function useSession() {
     const next = typewriterQueue.current.shift();
     if (!next) {
       typewriterRunning.current = false;
-      // Si on attendait un idle différé, l'appliquer maintenant
+      typewriterFlushNow.current = null;
       if (pendingIdle.current) {
         pendingIdle.current = false;
         setStatus("idle");
@@ -225,26 +235,51 @@ export function useSession() {
       }
       return;
     }
-    // Cible ~1500 chars/sec pour rester fluide même sur les longs textes.
-    // On adapte la taille du chunk au volume pour que les très gros textes
-    // (article 3000+ chars) ne mettent pas plus de ~2s à se révéler.
     const totalDurationMs = Math.min(2000, Math.max(400, next.length * 0.7));
     const TICK_MS = 30;
     const ticks = Math.max(1, Math.floor(totalDurationMs / TICK_MS));
     const charsPerTick = Math.max(2, Math.ceil(next.length / ticks));
     let pos = 0;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    typewriterFlushNow.current = () => {
+      if (cancelled) return;
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      // Append tout le restant d'un coup pour finir le block texte courant
+      if (pos < next.length) {
+        appendAssistantText(next.slice(pos));
+        pos = next.length;
+      }
+    };
     const tick = () => {
+      if (cancelled) return;
       const end = Math.min(pos + charsPerTick, next.length);
       appendAssistantText(next.slice(pos, end));
       pos = end;
       if (pos < next.length) {
-        setTimeout(tick, TICK_MS);
+        timer = setTimeout(tick, TICK_MS);
       } else {
-        // Texte courant fini → enchaîne sur le suivant si la queue n'est pas vide
         runNextReveal();
       }
     };
     tick();
+  }
+
+  // Finit immédiatement la révélation en cours + vide la queue. Appelé avant
+  // d'insérer un tool block ou une fin de turn, pour que le block texte
+  // courant contienne sa version finale (sinon le markdown se splitte).
+  function flushTypewriter() {
+    if (typewriterFlushNow.current) typewriterFlushNow.current();
+    while (typewriterQueue.current.length > 0) {
+      const t = typewriterQueue.current.shift()!;
+      appendAssistantText(t);
+    }
+    typewriterRunning.current = false;
+    typewriterFlushNow.current = null;
   }
 
   // Texte: on append au dernier block "text" pour préserver l'ordre
