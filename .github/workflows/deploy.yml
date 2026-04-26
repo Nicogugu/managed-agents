@@ -101,8 +101,12 @@ jobs:
           TRAEFIK=$(docker ps --format '{{.Names}}' | grep -i traefik | head -1)
           echo "→ Traefik container: $TRAEFIK"
           if [ -n "$TRAEFIK" ]; then
-            echo "→ Traefik logs (errors + editor-auth refs):"
-            docker logs "$TRAEFIK" --tail 100 2>&1 | grep -iE "error|editor-auth|agent-server|agent-web" | tail -15 || true
+            echo "→ Traefik full recent logs (last 50 lines):"
+            docker logs "$TRAEFIK" --tail 50 2>&1 || true
+            echo "→ Traefik HTTP routers via API:"
+            docker exec "$TRAEFIK" wget -qO- http://localhost:8080/api/http/routers 2>/dev/null | head -c 4000 || \
+              docker exec "$TRAEFIK" curl -sf http://localhost:8080/api/http/routers 2>/dev/null | head -c 4000 || \
+              echo "(traefik api not reachable)"
           fi
           EOF
 
