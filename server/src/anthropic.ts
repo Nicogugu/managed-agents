@@ -695,7 +695,19 @@ Migration, lancement de feature, expé qui mérite d'être documentée.
     },
   ];
 
-  // Idempotent upsert: try create, fall back to find+update if path exists
+  // Fichiers DYNAMIQUES alimentés par l'agent ou l'utilisateur — on les
+  // crée si manquants mais on n'écrase JAMAIS leur contenu (sinon on perd
+  // les leçons apprises et l'index des articles publiés à chaque redéploi).
+  const DYNAMIC_PATHS = new Set([
+    "/lessons.md",
+    "/articles/index.md",
+  ]);
+  // Les /voices/{slug}.md créés par l'utilisateur via le flow "Crée une brand
+  // voice depuis URLs" doivent aussi être préservés. On ne touche pas à un
+  // fichier voices/* qui existe déjà — sauf s'il fait partie du seed initial
+  // (article, tutorial, news, comparison, case-study), auquel cas on le
+  // garde aligné avec la config.
+
   for (const seed of seeds) {
     try {
       await (client.beta as any).memoryStores.memories.create(storeId, seed);
@@ -704,7 +716,13 @@ Migration, lancement de feature, expé qui mérite d'être documentée.
         console.error(`[memory seed] ${seed.path}:`, createErr.message);
         continue;
       }
-      // Already exists → update content
+      // Already exists. Pour les fichiers dynamiques: on ne touche pas (l'agent
+      // ou le user a possiblement écrit dedans). Pour les fichiers statiques
+      // (style, voices/{predefined}, README, etc.): upsert pour propager les
+      // modifs de prompt.
+      if (DYNAMIC_PATHS.has(seed.path)) {
+        continue;
+      }
       try {
         const list = await (client.beta as any).memoryStores.memories.list(storeId, {
           path_prefix: seed.path,
@@ -721,7 +739,9 @@ Migration, lancement de feature, expé qui mérite d'être documentée.
       }
     }
   }
-  console.log(`[anthropic] memory store seeded/updated with ${seeds.length} files`);
+  console.log(
+    `[anthropic] memory store seeded (statics upserted, dynamiques préservés)`,
+  );
 }
 
 // Cache la version courante de l'agent — résolue à getOrCreateAgent — pour
