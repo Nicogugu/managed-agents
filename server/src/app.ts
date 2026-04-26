@@ -1,6 +1,62 @@
 import express, { type Express } from "express";
 import cors from "cors";
 import { client, createSession } from "./anthropic.js";
+
+// Buffer d'events par session pour permettre au client de replay tout ce qui
+// a été manqué pendant qu'il était hors ligne (téléphone en veille, perte de
+// connexion). Le client envoie `Last-Event-ID` à la reconnexion, on lui rejoue
+// les events manquants puis on l'attache au stream live.
+type BufferedEvent = { id: number; data: unknown };
+type StreamState = {
+  events: BufferedEvent[];
+  pumpStarted: boolean;
+  pumpEnded: boolean;
+  pumpError?: string;
+  listeners: Set<(ev: BufferedEvent | { id: -1; eof: string }) => void>;
+};
+const sessionStreams = new Map<string, StreamState>();
+const MAX_BUFFERED_EVENTS = 5000;
+
+function getStreamState(sessionId: string): StreamState {
+  let s = sessionStreams.get(sessionId);
+  if (!s) {
+    s = {
+      events: [],
+      pumpStarted: false,
+      pumpEnded: false,
+      listeners: new Set(),
+    };
+    sessionStreams.set(sessionId, s);
+  }
+  return s;
+}
+
+async function startPump(sessionId: string): Promise<void> {
+  const state = getStreamState(sessionId);
+  if (state.pumpStarted) return;
+  state.pumpStarted = true;
+  try {
+    const stream = await client.beta.sessions.events.stream(sessionId);
+    for await (const ev of stream as any) {
+      const id = state.events.length + 1;
+      const item: BufferedEvent = { id, data: ev };
+      state.events.push(item);
+      if (state.events.length > MAX_BUFFERED_EVENTS) {
+        state.events.splice(0, state.events.length - MAX_BUFFERED_EVENTS);
+      }
+      for (const listener of state.listeners) listener(item);
+    }
+  } catch (err: any) {
+    console.error(`[pump:${sessionId}] error:`, err?.message);
+    state.pumpError = err?.message || "stream pump error";
+  } finally {
+    state.pumpEnded = true;
+    const reason = state.pumpError || "ended";
+    for (const listener of state.listeners) {
+      listener({ id: -1, eof: reason });
+    }
+  }
+}
 import {
   createPost,
   updatePost,
@@ -87,14 +143,15 @@ export function createApp(): Express {
     res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders?.();
 
-    const send = (data: unknown) => {
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
-    };
-
     let closed = false;
     req.on("close", () => {
       closed = true;
     });
+
+    const writeEvent = (id: number, data: unknown) => {
+      if (closed) return;
+      res.write(`id: ${id}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
 
     // Heartbeat toutes les 15s pour empêcher les proxies (Traefik, etc.)
     // de couper la connexion idle.
@@ -103,18 +160,48 @@ export function createApp(): Express {
       res.write(": ping\n\n");
     }, 15000);
 
-    try {
-      const stream = await client.beta.sessions.events.stream(id);
-      for await (const event of stream as any) {
-        if (closed) break;
-        send(event);
+    const lastIdHeader = req.headers["last-event-id"];
+    const lastEventId = lastIdHeader
+      ? parseInt(String(lastIdHeader), 10) || 0
+      : 0;
+
+    const state = getStreamState(id);
+
+    // 1. Replay des events manqués depuis Last-Event-ID
+    for (const ev of state.events) {
+      if (ev.id > lastEventId) {
+        writeEvent(ev.id, ev.data);
       }
-    } catch (err: any) {
-      console.error("[stream] error:", err);
-      if (!closed) send({ type: "error", message: err.message });
-    } finally {
+    }
+
+    // 2. Si le pump est déjà fini (session terminée Anthropic), close.
+    if (state.pumpEnded) {
       clearInterval(heartbeat);
       if (!closed) res.end();
+      return;
+    }
+
+    // 3. Tail le stream live: on s'inscrit comme listener
+    const listener = (ev: BufferedEvent | { id: -1; eof: string }) => {
+      if (closed) return;
+      if ("eof" in ev) {
+        // Stream Anthropic terminé
+        clearInterval(heartbeat);
+        res.end();
+        return;
+      }
+      writeEvent(ev.id, ev.data);
+    };
+    state.listeners.add(listener);
+
+    req.on("close", () => {
+      state.listeners.delete(listener);
+      clearInterval(heartbeat);
+    });
+
+    // 4. Si le pump n'a jamais démarré, le lancer (fire-and-forget)
+    if (!state.pumpStarted) {
+      void startPump(id);
     }
   });
 
