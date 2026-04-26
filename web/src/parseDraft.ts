@@ -1,8 +1,9 @@
-import type { WpDraft, WpPlan, TodoItem } from "./types";
+import type { WpDraft, WpPlan, TodoItem, WpAsk } from "./types";
 
 const POST_RE = /```wp-post\s*\n([\s\S]*?)```/g;
 const PLAN_RE = /```wp-plan\s*\n([\s\S]*?)```/g;
 const TODOS_RE = /```todos\s*\n([\s\S]*?)```/g;
+const ASK_RE = /```ask\s*\n([\s\S]*?)```/g;
 // Liste markdown libre: - [x|-| ] texte
 const LOOSE_TODO_LINE = /^[ \t]*-[ \t]+\[([ x\-X])\][ \t]+(.+)$/;
 
@@ -57,12 +58,40 @@ export function extractTodos(text: string): TodoItem[] {
   return items;
 }
 
-// Returns the text with wp-post / wp-plan / todos fences stripped (for clean bubble rendering).
+export function extractAsks(text: string): WpAsk[] {
+  const asks: WpAsk[] = [];
+  let m: RegExpExecArray | null;
+  ASK_RE.lastIndex = 0;
+  while ((m = ASK_RE.exec(text)) !== null) {
+    try {
+      const parsed = JSON.parse(m[1].trim());
+      if (parsed && Array.isArray(parsed.options) && parsed.options.length > 0) {
+        asks.push({
+          question: parsed.question,
+          options: parsed.options
+            .filter((o: any) => o && typeof o.label === "string" && typeof o.value === "string")
+            .map((o: any) => ({
+              label: o.label,
+              value: o.value,
+              emoji: o.emoji,
+              description: o.description,
+            })),
+        });
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return asks;
+}
+
+// Returns the text with wp-post / wp-plan / todos / ask fences stripped (for clean bubble rendering).
 export function stripBlocks(text: string): string {
   return text
     .replace(POST_RE, "")
     .replace(PLAN_RE, "")
     .replace(TODOS_RE, "")
+    .replace(ASK_RE, "")
     .trim();
 }
 

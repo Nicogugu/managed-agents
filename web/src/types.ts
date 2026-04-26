@@ -39,4 +39,16 @@ export type TodoItem = {
   text: string;
 };
 
+export type AskOption = {
+  label: string;
+  value: string;
+  emoji?: string;
+  description?: string;
+};
+
+export type WpAsk = {
+  question?: string;
+  options: AskOption[];
+};
+
 export type Mode = "validate" | "auto";

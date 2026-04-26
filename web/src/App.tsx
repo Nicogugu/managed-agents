@@ -2,13 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "./useSession";
 import { sendMessage, publishDraft, fetchHealth } from "./api";
 import {
+  extractAsks,
   extractDrafts,
   extractPlans,
   extractTodos,
   stripBlocks,
 } from "./parseDraft";
 import { PublishModal } from "./PublishModal";
-import type { ChatMessage, Mode, TodoItem, WpDraft, WpPlan } from "./types";
+import type { ChatMessage, Mode, TodoItem, WpAsk, WpDraft, WpPlan } from "./types";
 
 type Health = { ok: boolean; anthropicKey: boolean; wpConfigured: boolean };
 
@@ -16,6 +17,7 @@ export function App() {
   const { sessionId, messages, status, error, appendUserMessage } = useSession();
   const [input, setInput] = useState("");
   const [todosOpen, setTodosOpen] = useState(false);
+  const [textInputOpen, setTextInputOpen] = useState(false);
   // Todos courantes = dernier checklist non-vide trouvé dans un message assistant
   const todos = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -100,6 +102,16 @@ export function App() {
     }
   }
 
+  async function sendClick(label: string, value: string) {
+    if (!sessionId || status === "running") return;
+    appendUserMessage(label);
+    try {
+      await sendMessage(sessionId, value);
+    } catch (err: any) {
+      setToast(`Erreur · ${err.message}`);
+    }
+  }
+
   return (
     <div className="h-full flex flex-col bg-bg-primary text-text-primary">
       <Header
@@ -132,7 +144,7 @@ export function App() {
             </div>
           )}
           {messages.length === 0 && !error && (
-            <EmptyState />
+            <EmptyState onPick={sendClick} disabled={!sessionId || status === "running"} />
           )}
           {messages.map((m) => (
             <MessageBubble
@@ -140,6 +152,9 @@ export function App() {
               message={m}
               mode={mode}
               onPublish={(draft) => setPendingDraft(draft)}
+              onClickAsk={sendClick}
+              onApprovePlan={() => sendClick("✓ vasy", "vasy")}
+              disabled={status === "running"}
             />
           ))}
           {status === "running" && <Thinking />}
@@ -148,37 +163,68 @@ export function App() {
 
       <footer className="border-t border-border bg-bg-primary">
         <div className="max-w-3xl mx-auto p-3 sm:p-4">
-          <div className="surface rounded-xl flex items-end gap-2 p-2 focus-within:border-border-strong transition-colors">
-            <textarea
-              ref={textareaRef}
-              className="flex-1 bg-transparent border-0 resize-none px-2 py-1.5 text-md placeholder:text-text-muted focus:outline-none min-h-[24px] max-h-[200px]"
-              placeholder="Écrire à l'agent…"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-              disabled={!sessionId || status === "running"}
-              rows={1}
-            />
-            <button
-              onClick={handleSend}
-              disabled={!sessionId || !input.trim() || status === "running"}
-              className="btn-primary self-end"
-              aria-label="Envoyer"
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M2 7l10-4-3 10-2-4-5-2z" fill="currentColor" />
-              </svg>
-            </button>
-          </div>
-          <div className="mt-2 px-1 flex items-center justify-between text-xs text-text-muted">
-            <span>Entrée pour envoyer · Shift+Entrée pour saut de ligne</span>
-            <span className="hidden sm:inline">{messages.length} message{messages.length === 1 ? "" : "s"}</span>
-          </div>
+          {textInputOpen ? (
+            <>
+              <div className="surface rounded-xl flex items-end gap-2 p-2 focus-within:border-border-strong transition-colors">
+                <textarea
+                  ref={textareaRef}
+                  className="flex-1 bg-transparent border-0 resize-none px-2 py-1.5 text-md placeholder:text-text-muted focus:outline-none min-h-[24px] max-h-[200px]"
+                  placeholder="Écrire à l'agent…"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                  disabled={!sessionId || status === "running"}
+                  rows={1}
+                  autoFocus
+                />
+                <button
+                  onClick={handleSend}
+                  disabled={!sessionId || !input.trim() || status === "running"}
+                  className="btn-primary self-end"
+                  aria-label="Envoyer"
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M2 7l10-4-3 10-2-4-5-2z" fill="currentColor" />
+                  </svg>
+                </button>
+              </div>
+              <div className="mt-2 px-1 flex items-center justify-between text-xs text-text-muted">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTextInputOpen(false);
+                    setInput("");
+                  }}
+                  className="hover:text-text-tertiary"
+                >
+                  ← Mode boutons
+                </button>
+                <span className="hidden sm:inline">
+                  Entrée pour envoyer · Shift+Entrée pour saut de ligne
+                </span>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-between text-xs text-text-muted px-1">
+              <span>
+                {status === "running"
+                  ? "L'agent travaille…"
+                  : "Clique une option ci-dessus"}
+              </span>
+              <button
+                type="button"
+                onClick={() => setTextInputOpen(true)}
+                className="hover:text-text-tertiary underline"
+              >
+                ✎ Écrire
+              </button>
+            </div>
+          )}
         </div>
       </footer>
 
@@ -282,24 +328,66 @@ function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => voi
   );
 }
 
-function EmptyState() {
-  const examples = [
-    "Rédige un article SEO de 500 mots sur le café de spécialité",
-    "Mets à jour l'article #12 en ajoutant un paragraphe sur l'arabica",
-    "Liste mes 5 derniers articles WordPress",
+function EmptyState({
+  onPick,
+  disabled,
+}: {
+  onPick: (label: string, value: string) => void;
+  disabled: boolean;
+}) {
+  const starters: Array<{ emoji: string; label: string; description: string; value: string }> = [
+    {
+      emoji: "💡",
+      label: "Propose-moi 5 idées d'articles",
+      description: "L'agent regarde l'existant et te suggère des angles complémentaires",
+      value:
+        "Phase DISCOVER : regarde les articles WordPress existants et propose-moi 5 idées d'articles qui complètent (pas dupliquent) le contenu actuel. Émets un bloc ```ask``` avec les 5 options pour que je clique celle que je préfère.",
+    },
+    {
+      emoji: "✍",
+      label: "Rédige un article complet maintenant",
+      description: "L'agent demande le sujet via boutons et lance le pipeline",
+      value:
+        "Je veux un nouvel article. Émets un bloc ```ask``` pour me demander le format/longueur et la thématique parmi des choix cliquables.",
+    },
+    {
+      emoji: "🔄",
+      label: "Mets à jour un article existant",
+      description: "L'agent liste les articles cliquables",
+      value:
+        "Je veux mettre à jour un article existant. Liste les 10 articles les plus récents via /api/wp/posts et émets un bloc ```ask``` avec les options cliquables.",
+    },
+    {
+      emoji: "🎨",
+      label: "Génère juste une image",
+      description: "Sans article, juste une image dans WP Media",
+      value:
+        "Je veux générer une image (sans article). Émets un bloc ```ask``` pour me demander le sujet/style parmi des choix.",
+    },
   ];
   return (
-    <div className="text-center py-12 sm:py-20">
-      <div className="text-text-secondary text-md mb-2">Demande à l'agent</div>
-      <div className="text-text-muted text-sm mb-6">
-        de rédiger, mettre à jour, ou rechercher avant publication
+    <div className="py-6 sm:py-10">
+      <div className="text-center mb-6">
+        <div className="text-text-secondary text-md mb-1">Article Code</div>
+        <div className="text-text-muted text-sm">
+          Clique pour démarrer — l'agent te guide en mode boutons.
+        </div>
       </div>
       <div className="flex flex-col gap-2 max-w-md mx-auto">
-        {examples.map((ex) => (
-          <div key={ex} className="surface rounded-md px-3 py-2 text-sm text-text-secondary text-left">
-            <span className="text-text-muted mr-2">›</span>
-            {ex}
-          </div>
+        {starters.map((s) => (
+          <button
+            key={s.label}
+            type="button"
+            onClick={() => onPick(s.label, s.value)}
+            disabled={disabled}
+            className="surface rounded-lg px-4 py-3 text-left hover:bg-bg-tertiary hover:border-accent/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-start gap-3"
+          >
+            <span className="text-xl flex-shrink-0 leading-none mt-0.5">{s.emoji}</span>
+            <span className="flex-1 min-w-0">
+              <span className="block text-sm text-text-primary font-medium">{s.label}</span>
+              <span className="block text-xs text-text-tertiary mt-0.5">{s.description}</span>
+            </span>
+          </button>
         ))}
       </div>
     </div>
@@ -327,10 +415,16 @@ function MessageBubble({
   message,
   mode,
   onPublish,
+  onClickAsk,
+  onApprovePlan,
+  disabled,
 }: {
   message: ChatMessage;
   mode: Mode;
   onPublish: (draft: WpDraft) => void;
+  onClickAsk: (label: string, value: string) => void;
+  onApprovePlan: () => void;
+  disabled: boolean;
 }) {
   if (message.role === "user") {
     return (
@@ -344,6 +438,7 @@ function MessageBubble({
 
   const drafts = useMemo(() => extractDrafts(message.text), [message.text]);
   const plans = useMemo(() => extractPlans(message.text), [message.text]);
+  const asks = useMemo(() => extractAsks(message.text), [message.text]);
   const visibleText = useMemo(() => stripBlocks(message.text), [message.text]);
 
   return (
@@ -363,7 +458,7 @@ function MessageBubble({
       )}
 
       {plans.map((plan, i) => (
-        <PlanCard key={`plan-${i}`} plan={plan} />
+        <PlanCard key={`plan-${i}`} plan={plan} onApprove={onApprovePlan} disabled={disabled} />
       ))}
 
       {drafts.map((draft, i) => (
@@ -374,11 +469,63 @@ function MessageBubble({
           onPublish={() => onPublish(draft)}
         />
       ))}
+
+      {asks.map((ask, i) => (
+        <AskCard key={`ask-${i}`} ask={ask} onClick={onClickAsk} disabled={disabled} />
+      ))}
     </div>
   );
 }
 
-function PlanCard({ plan }: { plan: WpPlan }) {
+function AskCard({
+  ask,
+  onClick,
+  disabled,
+}: {
+  ask: WpAsk;
+  onClick: (label: string, value: string) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="surface rounded-xl p-3 sm:p-4 bg-accent-subtle border-accent/20">
+      {ask.question && (
+        <div className="text-sm text-text-primary font-medium mb-3">{ask.question}</div>
+      )}
+      <div className="flex flex-col gap-2">
+        {ask.options.map((opt, i) => (
+          <button
+            key={i}
+            type="button"
+            onClick={() => onClick(opt.label, opt.value)}
+            disabled={disabled}
+            className="w-full text-left px-3 py-2 rounded-lg border border-border bg-bg-tertiary hover:bg-bg-elevated hover:border-accent/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-start gap-2"
+          >
+            {opt.emoji && (
+              <span className="text-lg flex-shrink-0 leading-none mt-0.5">{opt.emoji}</span>
+            )}
+            <span className="flex-1 min-w-0">
+              <span className="block text-sm text-text-primary font-medium">{opt.label}</span>
+              {opt.description && (
+                <span className="block text-xs text-text-tertiary mt-0.5">{opt.description}</span>
+              )}
+            </span>
+            <span className="text-text-muted flex-shrink-0">→</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PlanCard({
+  plan,
+  onApprove,
+  disabled,
+}: {
+  plan: WpPlan;
+  onApprove: () => void;
+  disabled: boolean;
+}) {
   return (
     <div className="surface rounded-xl p-3 sm:p-4 border-amber-500/30 bg-amber-500/5">
       <div className="flex items-center gap-2 mb-2">
@@ -429,9 +576,15 @@ function PlanCard({ plan }: { plan: WpPlan }) {
           </ul>
         </details>
       )}
-      <div className="text-xs text-text-muted mt-2">
-        Réponds <kbd className="font-mono px-1 bg-bg-tertiary rounded">vasy</kbd> pour valider
-        et passer en DRAFT.
+      <div className="mt-3 flex justify-end">
+        <button
+          type="button"
+          onClick={onApprove}
+          disabled={disabled}
+          className="btn-primary"
+        >
+          ✓ Approuver et drafter
+        </button>
       </div>
     </div>
   );
