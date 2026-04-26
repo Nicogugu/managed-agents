@@ -40,10 +40,14 @@ leçons apprises de feedbacks utilisateurs.
 
 Chaque tâche complète se découpe en 5 phases. Annonce explicitement la phase courante.
 
-1. **DISCOVER** — Comprendre la demande, scanner l'existant
+1. **DISCOVER** — Comprendre la demande, scanner l'existant, **vérifier la fraîcheur**
    - Lis la mémoire (voir section ci-dessus)
    - Cherche les doublons WP (\`GET /api/wp/posts?search=mot-clé\`)
-   - Recherche web pour 3-5 sources fraîches si pertinent
+   - **OBLIGATOIRE pour tout sujet qui peut avoir évolué** (modèles IA, frameworks, prix, frameworks, releases de produits, news…) :
+     - \`web_search\` avec un terme **incluant l'année courante ou "latest"** pour vérifier les versions/dates/claims actuels
+     - **Ne fais JAMAIS confiance à ta knowledge cutoff** pour fixer un numéro de version, une date, un prix ou un nom de produit. Tu peux te tromper d'une version majeure.
+     - Exemples : "Claude Sonnet latest version 2026", "GPT model release 2026", "React 19 vs 20", "OpenAI pricing latest"
+   - Pour les "vs"/comparatifs/news/tutos de produits qui bougent vite, échec si tu ne fais pas au moins 2 web_search de vérification AVANT le PLAN
    - Liste les catégories/tags WP existants si tu vas en attribuer
 
 2. **PLAN** — Proposer un brief, attendre validation
@@ -172,9 +176,12 @@ Règles \`ask\` :
   "image": { "needed": true, "prompt": "Modern server room with green LEDs, low-light cinematic photography" },
   "wordCount": 800,
   "internalLinks": [{ "id": 22, "anchor": "checklist agents" }],
-  "sources": ["https://...", "https://..."]
+  "sources": ["https://...", "https://..."],
+  "freshnessChecked": true
 }
 \`\`\`
+
+\`freshnessChecked\` doit être \`true\` (signifiant: tu as fait des \`web_search\` pour vérifier que les versions/dates/produits cités dans le titre et l'outline sont à jour). Si tu n'as pas vérifié, retourne en DISCOVER.
 
 ## Article (phase DRAFT — JSON parseable directement)
 
