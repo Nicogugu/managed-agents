@@ -15,6 +15,7 @@ type Health = { ok: boolean; anthropicKey: boolean; wpConfigured: boolean };
 export function App() {
   const { sessionId, messages, status, error, appendUserMessage } = useSession();
   const [input, setInput] = useState("");
+  const [todosOpen, setTodosOpen] = useState(false);
   // Todos courantes = dernier checklist non-vide trouvé dans un message assistant
   const todos = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -24,6 +25,16 @@ export function App() {
       if (t.length > 0) return t;
     }
     return [];
+  }, [messages]);
+  const currentPhase = useMemo(() => {
+    // Cherche la dernière phase déclarée par l'agent ("Phase: DISCOVER", "📋 Phase: PLAN"...)
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role !== "assistant") continue;
+      const match = m.text.match(/Phase\s*:\s*(DISCOVER|PLAN|DRAFT|REVIEW|PUBLISH)/i);
+      if (match) return match[1].toUpperCase();
+    }
+    return null;
   }, [messages]);
   const [mode, setMode] = useState<Mode>("validate");
   const [pendingDraft, setPendingDraft] = useState<WpDraft | null>(null);
@@ -98,9 +109,17 @@ export function App() {
         onModeChange={setMode}
       />
 
+      {(todos.length > 0 || currentPhase) && (
+        <TodosBar
+          todos={todos}
+          phase={currentPhase}
+          open={todosOpen}
+          onToggle={() => setTodosOpen((o) => !o)}
+        />
+      )}
+
       <main ref={scrollRef} className="flex-1 overflow-auto">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-3">
-          {todos.length > 0 && <TodosPanel todos={todos} />}
           {error && (
             <div className="surface border-red-500/40 bg-red-500/10 text-red-300 text-sm rounded-md p-3">
               {error}
@@ -417,45 +436,103 @@ function PlanCard({ plan }: { plan: WpPlan }) {
   );
 }
 
-function TodosPanel({ todos }: { todos: TodoItem[] }) {
-  if (todos.length === 0) return null;
+const PHASE_LABELS: Record<string, { emoji: string; label: string }> = {
+  DISCOVER: { emoji: "🔍", label: "Discover" },
+  PLAN: { emoji: "📋", label: "Plan" },
+  DRAFT: { emoji: "✍", label: "Draft" },
+  REVIEW: { emoji: "🔎", label: "Review" },
+  PUBLISH: { emoji: "🚀", label: "Publish" },
+};
+
+function TodosBar({
+  todos,
+  phase,
+  open,
+  onToggle,
+}: {
+  todos: TodoItem[];
+  phase: string | null;
+  open: boolean;
+  onToggle: () => void;
+}) {
   const done = todos.filter((t) => t.status === "done").length;
+  const inProgress = todos.find((t) => t.status === "in_progress");
+  const pct = todos.length === 0 ? 0 : (done / todos.length) * 100;
+  const phaseInfo = phase ? PHASE_LABELS[phase] : null;
+
   return (
-    <div className="surface rounded-lg p-3 sticky top-14 max-h-[40vh] overflow-auto">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
-          Todos
-        </span>
-        <span className="text-xs text-text-muted">
-          {done}/{todos.length}
-        </span>
-      </div>
-      <ul className="space-y-1">
-        {todos.map((t, i) => (
-          <li key={i} className="flex items-start gap-2 text-sm">
-            <span className="mt-0.5 flex-shrink-0">
-              {t.status === "done" ? (
-                <span className="text-emerald-500">✓</span>
-              ) : t.status === "in_progress" ? (
-                <span className="text-amber-400 animate-pulse">▸</span>
+    <div className="border-b border-border bg-bg-elevated">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-center gap-2 px-4 sm:px-6 py-2 text-left hover:bg-bg-tertiary transition-colors"
+      >
+        {phaseInfo && (
+          <span className="flex items-center gap-1 text-sm font-medium text-text-primary flex-shrink-0">
+            <span>{phaseInfo.emoji}</span>
+            <span>{phaseInfo.label}</span>
+          </span>
+        )}
+        {todos.length > 0 && (
+          <>
+            <span className="text-text-muted">·</span>
+            <span className="flex-1 min-w-0">
+              {inProgress ? (
+                <span className="text-xs text-text-secondary truncate inline-block max-w-full align-middle">
+                  <span className="text-amber-400 mr-1 animate-pulse">▸</span>
+                  {inProgress.text}
+                </span>
               ) : (
-                <span className="text-text-muted">○</span>
+                <span className="text-xs text-text-muted">
+                  {done === todos.length ? "tout terminé" : "en attente"}
+                </span>
               )}
             </span>
-            <span
-              className={
-                t.status === "done"
-                  ? "text-text-muted line-through"
-                  : t.status === "in_progress"
-                  ? "text-text-primary font-medium"
-                  : "text-text-secondary"
-              }
-            >
-              {t.text}
+            <span className="text-xs text-text-tertiary flex-shrink-0 font-mono tabular-nums">
+              {done}/{todos.length}
             </span>
-          </li>
-        ))}
-      </ul>
+          </>
+        )}
+        <span className="text-text-muted text-sm flex-shrink-0">
+          {open ? "▾" : "▸"}
+        </span>
+      </button>
+
+      {todos.length > 0 && (
+        <div
+          className="h-0.5 bg-emerald-500/70 transition-all duration-300"
+          style={{ width: `${pct}%` }}
+        />
+      )}
+
+      {open && todos.length > 0 && (
+        <ul className="px-4 sm:px-6 py-2 space-y-1 border-t border-border max-h-[50vh] overflow-auto">
+          {todos.map((t, i) => (
+            <li key={i} className="flex items-start gap-2 text-sm">
+              <span className="mt-0.5 flex-shrink-0 w-4 text-center">
+                {t.status === "done" ? (
+                  <span className="text-emerald-500">✓</span>
+                ) : t.status === "in_progress" ? (
+                  <span className="text-amber-400 animate-pulse">▸</span>
+                ) : (
+                  <span className="text-text-muted">○</span>
+                )}
+              </span>
+              <span
+                className={
+                  t.status === "done"
+                    ? "text-text-muted line-through"
+                    : t.status === "in_progress"
+                    ? "text-text-primary font-medium"
+                    : "text-text-secondary"
+                }
+              >
+                {t.text}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
