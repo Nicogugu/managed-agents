@@ -73,7 +73,11 @@ jobs:
           printf 'WP_APP_PASSWORD=%s\n' "$WP_APP_PASSWORD" >> .env
           printf 'GEMINI_API_KEY=%s\n' "$GEMINI_API_KEY" >> .env
           printf 'VPS_IP=%s\n' "$VPS_IP" >> .env
-          printf 'EDITOR_AUTH_USERS=%s\n' "$EDITOR_AUTH_USERS" >> .env
+          # EDITOR_AUTH_USERS arrive en single-\$ (le secret est stocké tel quel).
+          # Docker compose interprète \$ comme variable substitution, donc on
+          # double les \$ AVANT d'écrire dans .env. Bash parameter expansion:
+          AUTH_ESCAPED="${EDITOR_AUTH_USERS//\$/\$\$}"
+          printf 'EDITOR_AUTH_USERS=%s\n' "$AUTH_ESCAPED" >> .env
           docker compose -f docker-compose.local.yml --env-file .env up -d --build
           echo "→ Status:"
           docker compose -f docker-compose.local.yml ps
