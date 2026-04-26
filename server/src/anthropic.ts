@@ -215,22 +215,29 @@ Ne termine JAMAIS un tour uniquement sur des appels d'outils — toujours par un
 Réponds en français. Sois concis. Sois rigoureux sur le workflow.`;
 
 const AGENT_NAME = "wp-editor";
-const AGENT_MODEL = process.env.AGENT_MODEL || "claude-sonnet-4-6";
+// Défaut: Sonnet 4.6 standard — bon équilibre vitesse/coût/qualité.
+// Pour passer en Opus 4.6 + fast (premium): AGENT_MODEL=claude-opus-4-6 AGENT_SPEED=fast
+// Voir https://platform.claude.com/docs/en/managed-agents/agent-setup
+const AGENT_MODEL_ID = process.env.AGENT_MODEL || "claude-sonnet-4-6";
+const AGENT_MODEL_SPEED: "fast" | "standard" =
+  (process.env.AGENT_SPEED as any) || "standard";
 let cachedAgentId: string | null = null;
 
 export async function getOrCreateAgent(): Promise<string> {
   if (cachedAgentId) return cachedAgentId;
 
-  // Cherche un agent existant par nom + modèle pour éviter d'accumuler des
-  // orphelins à chaque deploy. Si modèle/system_prompt changent on en crée un
-  // nouveau (l'ancien reste accessible via son ID mais les futures sessions
-  // utilisent le nouveau).
+  // Cherche un agent existant matchant nom + modèle + speed + system pour
+  // éviter d'accumuler des orphelins à chaque deploy.
   try {
     const existing = await (client.beta as any).agents.list();
     for await (const a of existing as any) {
-      if (a.name === AGENT_NAME && a.model === AGENT_MODEL && a.system === SYSTEM_PROMPT) {
+      const modelMatch =
+        a.model?.id === AGENT_MODEL_ID && a.model?.speed === AGENT_MODEL_SPEED;
+      if (a.name === AGENT_NAME && modelMatch && a.system === SYSTEM_PROMPT) {
         cachedAgentId = a.id;
-        console.log(`[anthropic] agent reused: ${a.id} (${AGENT_MODEL})`);
+        console.log(
+          `[anthropic] agent reused: ${a.id} (${AGENT_MODEL_ID} speed=${AGENT_MODEL_SPEED})`,
+        );
         return a.id;
       }
     }
@@ -240,15 +247,15 @@ export async function getOrCreateAgent(): Promise<string> {
 
   const agent = await client.beta.agents.create({
     name: AGENT_NAME,
-    // Sonnet 4.6 = ~2-3× plus rapide qu'Opus 4.7, qualité largement suffisante
-    // pour de la rédaction éditoriale + tool use. Override via AGENT_MODEL.
-    model: AGENT_MODEL,
+    model: { id: AGENT_MODEL_ID, speed: AGENT_MODEL_SPEED } as any,
     system: SYSTEM_PROMPT,
     tools: [{ type: "agent_toolset_20260401" }],
   });
 
   cachedAgentId = agent.id;
-  console.log(`[anthropic] agent created: ${agent.id} v${agent.version} (${AGENT_MODEL})`);
+  console.log(
+    `[anthropic] agent created: ${agent.id} v${agent.version} (${AGENT_MODEL_ID} speed=${AGENT_MODEL_SPEED})`,
+  );
   return agent.id;
 }
 
