@@ -8,33 +8,33 @@ const SYSTEM_PROMPT = `Tu es **Article Code**, un agent éditorial pour WordPres
 
 # Mémoire persistante (CRITIQUE)
 
-Tu as une mémoire éditoriale persistante montée sur \`/mnt/memory/\` (read-write,
+Tu as une mémoire éditoriale persistante montée sur \`/mnt/memory/wp-editor-knowledge/\` (read-write,
 survit entre sessions). Elle contient le positionnement du site, l'audience, le
 style, les brand voices par type de page, l'index des articles publiés, et les
 leçons apprises de feedbacks utilisateurs.
 
 **Au début de chaque phase DISCOVER, lis OBLIGATOIREMENT :**
-- \`/mnt/memory/README.md\` (workflow + arborescence)
-- \`/mnt/memory/site.md\` (positionnement)
-- \`/mnt/memory/audience.md\` (lecteur cible)
-- \`/mnt/memory/style/voice.md\` + \`/style/banned.md\` + \`/style/preferred.md\`
+- \`/mnt/memory/wp-editor-knowledge/README.md\` (workflow + arborescence)
+- \`/mnt/memory/wp-editor-knowledge/site.md\` (positionnement)
+- \`/mnt/memory/wp-editor-knowledge/audience.md\` (lecteur cible)
+- \`/mnt/memory/wp-editor-knowledge/style/voice.md\` + \`/style/banned.md\` + \`/style/preferred.md\`
 
 **Avant de drafter, charge la brand voice du type de page :**
-- \`/mnt/memory/voices/article.md\` (par défaut, fond technique)
-- \`/mnt/memory/voices/tutorial.md\`
-- \`/mnt/memory/voices/news.md\`
-- \`/mnt/memory/voices/comparison.md\`
-- \`/mnt/memory/voices/case-study.md\`
+- \`/mnt/memory/wp-editor-knowledge/voices/article.md\` (par défaut, fond technique)
+- \`/mnt/memory/wp-editor-knowledge/voices/tutorial.md\`
+- \`/mnt/memory/wp-editor-knowledge/voices/news.md\`
+- \`/mnt/memory/wp-editor-knowledge/voices/comparison.md\`
+- \`/mnt/memory/wp-editor-knowledge/voices/case-study.md\`
 
 **Si l'utilisateur demande de créer une nouvelle brand voice :**
 1. Demande-lui via \`ask\` 1 à 3 URLs d'articles dont il aime le style
 2. \`web_fetch\` chaque URL
 3. Analyse le ton, structure, vocabulaire, hooks d'intro/conclusion
-4. Écris le résultat dans \`/mnt/memory/voices/{slug}.md\` avec sections : Ton, Structure, Vocabulaire, Exemples, Quand l'utiliser
+4. Écris le résultat dans \`/mnt/memory/wp-editor-knowledge/voices/{slug}.md\` avec sections : Ton, Structure, Vocabulaire, Exemples, Quand l'utiliser
 
 **Mise à jour de la mémoire (REVIEW / fin de tâche) :**
-- Article publié → ajoute une ligne à \`/mnt/memory/articles/index.md\`
-- Feedback utilisateur ("plus comme ça", "fais plutôt X") → ajoute à \`/mnt/memory/lessons.md\`
+- Article publié → ajoute une ligne à \`/mnt/memory/wp-editor-knowledge/articles/index.md\`
+- Feedback utilisateur ("plus comme ça", "fais plutôt X") → ajoute à \`/mnt/memory/wp-editor-knowledge/lessons.md\`
 
 # Workflow par phases
 
@@ -52,7 +52,7 @@ Chaque tâche complète se découpe en 5 phases. Annonce explicitement la phase 
    - L'utilisateur peut amender le plan, tu re-proposes
 
 3. **DRAFT** — Rédiger l'article HTML
-   - Identifie le type de page et lis la brand voice correspondante dans \`/mnt/memory/voices/\`
+   - Identifie le type de page et lis la brand voice correspondante dans \`/mnt/memory/wp-editor-knowledge/voices/\`
    - Utilise ta sandbox (\`write\`, \`edit\`) pour itérer sur des fichiers de brouillon si l'article est long
    - Génère les images via \`POST /api/image\` AVANT le wp-post final (les images doivent exister dans WP Media pour être référencées)
    - Émets le bloc \`wp-post\` final (JSON, voir format)
@@ -252,33 +252,48 @@ export async function getOrCreateEnvironment(): Promise<string> {
 
 const MEMORY_STORE_NAME = "wp-editor-knowledge";
 let cachedMemoryStoreId: string | null = process.env.MEMORY_STORE_ID || null;
+let memorySeededThisProcess = false;
 
 export async function getOrCreateMemoryStore(): Promise<string> {
-  if (cachedMemoryStoreId) return cachedMemoryStoreId;
+  if (cachedMemoryStoreId && memorySeededThisProcess) return cachedMemoryStoreId;
 
-  // Idempotent: list existing stores by name avant de créer
-  try {
-    const existing = await client.beta.memoryStores.list({ include_archived: false } as any);
-    for await (const s of existing as any) {
-      if (s.name === MEMORY_STORE_NAME) {
-        cachedMemoryStoreId = s.id;
-        console.log(`[anthropic] memory store reused: ${s.id}`);
-        return s.id;
+  let storeId = cachedMemoryStoreId;
+  if (!storeId) {
+    // Idempotent: list existing stores by name avant de créer
+    try {
+      const existing = await (client.beta as any).memoryStores.list({
+        include_archived: false,
+      });
+      for await (const s of existing as any) {
+        if (s.name === MEMORY_STORE_NAME) {
+          storeId = s.id;
+          console.log(`[anthropic] memory store reused: ${s.id}`);
+          break;
+        }
       }
+    } catch (err: any) {
+      console.warn("[anthropic] memory list failed, will create:", err.message);
     }
-  } catch (err: any) {
-    console.warn("[anthropic] memory list failed, will create:", err.message);
+
+    if (!storeId) {
+      const store = await (client.beta as any).memoryStores.create({
+        name: MEMORY_STORE_NAME,
+        description:
+          "Knowledge base persistent du site WordPress: style éditorial, audience, brand voices par type de page, articles publiés, leçons apprises.",
+      });
+      storeId = store.id;
+      console.log(`[anthropic] memory store created: ${storeId}`);
+    }
+    cachedMemoryStoreId = storeId;
   }
 
-  const store = await (client.beta as any).memoryStores.create({
-    name: MEMORY_STORE_NAME,
-    description:
-      "Knowledge base persistent du site WordPress: style éditorial, audience, brand voices par type de page, articles publiés, leçons apprises.",
-  });
-  cachedMemoryStoreId = store.id;
-  console.log(`[anthropic] memory store created: ${store.id}`);
-  await seedMemoryStore(store.id);
-  return store.id;
+  // Seed (upsert) une fois par processus pour garder le contenu à jour avec
+  // les changements de prompt même si le store existait déjà.
+  if (!memorySeededThisProcess) {
+    memorySeededThisProcess = true;
+    await seedMemoryStore(storeId!);
+  }
+  return storeId!;
 }
 
 async function seedMemoryStore(storeId: string): Promise<void> {
@@ -296,34 +311,34 @@ phase DISCOVER et la mettre à jour à la fin des tâches significatives.
 ## Workflow obligatoire
 
 1. **Phase DISCOVER**
-   - \`glob /mnt/memory/**/*.md\` pour voir ce qui existe
-   - Lis \`/mnt/memory/site.md\`, \`/mnt/memory/audience.md\`, \`/mnt/memory/style/voice.md\`
-   - Avant DRAFT : lis la brand voice du type de page (\`/mnt/memory/voices/{type}.md\`)
+   - \`glob /mnt/memory/wp-editor-knowledge/**/*.md\` pour voir ce qui existe
+   - Lis \`/mnt/memory/wp-editor-knowledge/site.md\`, \`/mnt/memory/wp-editor-knowledge/audience.md\`, \`/mnt/memory/wp-editor-knowledge/style/voice.md\`
+   - Avant DRAFT : lis la brand voice du type de page (\`/mnt/memory/wp-editor-knowledge/voices/{type}.md\`)
 
 2. **Phase REVIEW / fin de tâche**
-   - Si tu as appris quelque chose (user a dit "fais plutôt comme X") → ajoute à \`/mnt/memory/lessons.md\`
-   - Quand un article est publié → ajoute une ligne à \`/mnt/memory/articles/index.md\`
+   - Si tu as appris quelque chose (user a dit "fais plutôt comme X") → ajoute à \`/mnt/memory/wp-editor-knowledge/lessons.md\`
+   - Quand un article est publié → ajoute une ligne à \`/mnt/memory/wp-editor-knowledge/articles/index.md\`
 
 ## Arborescence
 
-- \`/mnt/memory/site.md\` — positionnement du site
-- \`/mnt/memory/audience.md\` — profil lecteur
-- \`/mnt/memory/style/voice.md\` — voix par défaut
-- \`/mnt/memory/style/banned.md\` — formulations à éviter
-- \`/mnt/memory/style/preferred.md\` — formulations préférées
-- \`/mnt/memory/voices/{article,tutorial,news,comparison,case-study}.md\` — brand voice par type de page
-- \`/mnt/memory/image-style.md\` — guidelines visuelles Nano Banana
-- \`/mnt/memory/articles/index.md\` — index des articles publiés (à mettre à jour)
-- \`/mnt/memory/lessons.md\` — leçons apprises de feedbacks utilisateurs
+- \`/mnt/memory/wp-editor-knowledge/site.md\` — positionnement du site
+- \`/mnt/memory/wp-editor-knowledge/audience.md\` — profil lecteur
+- \`/mnt/memory/wp-editor-knowledge/style/voice.md\` — voix par défaut
+- \`/mnt/memory/wp-editor-knowledge/style/banned.md\` — formulations à éviter
+- \`/mnt/memory/wp-editor-knowledge/style/preferred.md\` — formulations préférées
+- \`/mnt/memory/wp-editor-knowledge/voices/{article,tutorial,news,comparison,case-study}.md\` — brand voice par type de page
+- \`/mnt/memory/wp-editor-knowledge/image-style.md\` — guidelines visuelles Nano Banana
+- \`/mnt/memory/wp-editor-knowledge/articles/index.md\` — index des articles publiés (à mettre à jour)
+- \`/mnt/memory/wp-editor-knowledge/lessons.md\` — leçons apprises de feedbacks utilisateurs
 
 ## Brand voices par type de page
 
 Avant chaque DRAFT, identifie le **type de page** (article-fond, tutorial, news,
-comparison, case-study) et lis le fichier \`/mnt/memory/voices/{type}.md\`.
+comparison, case-study) et lis le fichier \`/mnt/memory/wp-editor-knowledge/voices/{type}.md\`.
 
 L'utilisateur peut te demander de créer une nouvelle brand voice à partir d'URLs.
 Workflow : \`web_fetch\` les URLs → analyse le ton/structure/vocabulaire → écris
-le résultat dans \`/mnt/memory/voices/{nouveau-type}.md\` avec sections : Ton,
+le résultat dans \`/mnt/memory/wp-editor-knowledge/voices/{nouveau-type}.md\` avec sections : Ton,
 Structure, Vocabulaire, Exemples, Quand l'utiliser.
 `,
     },
@@ -543,16 +558,33 @@ Migration, lancement de feature, expé qui mérite d'être documentée.
     },
   ];
 
+  // Idempotent upsert: try create, fall back to find+update if path exists
   for (const seed of seeds) {
     try {
       await (client.beta as any).memoryStores.memories.create(storeId, seed);
-    } catch (err: any) {
-      if (!String(err.message).match(/already exists|conflict/i)) {
-        console.error(`[memory seed] ${seed.path}:`, err.message);
+    } catch (createErr: any) {
+      if (!String(createErr.message).match(/already exists|conflict/i)) {
+        console.error(`[memory seed] ${seed.path}:`, createErr.message);
+        continue;
+      }
+      // Already exists → update content
+      try {
+        const list = await (client.beta as any).memoryStores.memories.list(storeId, {
+          path_prefix: seed.path,
+        });
+        const existing = (list.data || []).find((m: any) => m.path === seed.path);
+        if (existing) {
+          await (client.beta as any).memoryStores.memories.update(existing.id, {
+            memory_store_id: storeId,
+            content: seed.content,
+          });
+        }
+      } catch (updateErr: any) {
+        console.error(`[memory seed update] ${seed.path}:`, updateErr.message);
       }
     }
   }
-  console.log(`[anthropic] memory store seeded with ${seeds.length} files`);
+  console.log(`[anthropic] memory store seeded/updated with ${seeds.length} files`);
 }
 
 export async function createSession(title: string) {
@@ -572,7 +604,7 @@ export async function createSession(title: string) {
         memory_store_id: memoryStoreId,
         access: "read_write",
         instructions:
-          "Mémoire éditoriale persistante du site. Lis /mnt/memory/README.md d'abord. Avant de drafter, charge la brand voice du type de page (/mnt/memory/voices/{type}.md). Mets à jour /articles/index.md à chaque publication et /lessons.md quand tu apprends quelque chose.",
+          "Mémoire éditoriale persistante du site. Lis /mnt/memory/wp-editor-knowledge/README.md d'abord. Avant de drafter, charge la brand voice du type de page (/mnt/memory/wp-editor-knowledge/voices/{type}.md). Mets à jour /articles/index.md à chaque publication et /lessons.md quand tu apprends quelque chose.",
       },
     ] as any,
   });
