@@ -30,7 +30,19 @@ type PublishState =
   | { status: "error"; error: string };
 
 export function App() {
-  const { sessionId, messages, status, error, appendUserMessage, newSession } = useSession();
+  const { sessionId, messages, status, error, lastEventAt, appendUserMessage, newSession } = useSession();
+  // Tick toutes les secondes quand l'agent travaille pour afficher l'âge du
+  // dernier event (silence prolongé = peut-être bloqué)
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (status !== "running") return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [status]);
+  const silenceSec =
+    status === "running" && lastEventAt > 0
+      ? Math.floor((now - lastEventAt) / 1000)
+      : 0;
   const [input, setInput] = useState("");
   const [todosOpen, setTodosOpen] = useState(false);
   const [textInputOpen, setTextInputOpen] = useState(false);
@@ -180,8 +192,11 @@ export function App() {
     ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
   }, [input]);
 
+  // Permet d'envoyer même quand l'agent travaille — Anthropic queue les
+  // user.message dans la session, l'agent les traite dans le tour suivant
+  // (ou les absorbe dans le tour en cours selon le timing).
   async function handleSend() {
-    if (!sessionId || !input.trim() || status === "running") return;
+    if (!sessionId || !input.trim()) return;
     const text = input.trim();
     appendUserMessage(text);
     setInput("");
@@ -193,7 +208,7 @@ export function App() {
   }
 
   async function sendClick(label: string, value: string) {
-    if (!sessionId || status === "running") return;
+    if (!sessionId) return;
     appendUserMessage(label);
     try {
       await sendMessage(sessionId, value);
@@ -267,7 +282,7 @@ export function App() {
               disabled={status === "running"}
             />
           ))}
-          {status === "running" && <Thinking activity={activity} />}
+          {status === "running" && <Thinking activity={activity} silenceSec={silenceSec} />}
         </div>
       </main>
 
@@ -565,8 +580,10 @@ function EmptyState({
 
 function Thinking({
   activity,
+  silenceSec,
 }: {
   activity: { icon: string; text: string; mono?: boolean } | null;
+  silenceSec: number;
 }) {
   return (
     <div className="flex items-start gap-2 text-xs text-text-muted px-1 py-2">
@@ -580,7 +597,18 @@ function Thinking({
         ))}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="text-text-muted">l'agent travaille…</div>
+        <div className="flex items-center gap-2 text-text-muted">
+          <span>l'agent travaille…</span>
+          {silenceSec >= 3 && (
+            <span
+              className={`tabular-nums ${
+                silenceSec >= 30 ? "text-amber-400" : "text-text-muted"
+              }`}
+            >
+              {silenceSec}s
+            </span>
+          )}
+        </div>
         {activity && (
           <div className="mt-0.5 flex items-center gap-1.5 text-text-secondary overflow-hidden whitespace-nowrap">
             <span className="flex-shrink-0 animate-pulse">{activity.icon}</span>

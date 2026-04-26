@@ -32,6 +32,9 @@ export function useSession() {
   // browser tue l'EventSource en arrière-plan (mobile en veille >2-3min)
   const lastEventIdRef = useRef<number>(0);
   const sessionIdRef = useRef<string | null>(null);
+  // Timestamp du dernier event reçu, pour afficher "Réflexion (Ns)" et que
+  // l'utilisateur voie que l'agent bosse vs qu'il est planté
+  const [lastEventAt, setLastEventAt] = useState<number>(0);
   // Queue de typewriter pour simuler du streaming token-par-token
   // (l'API Managed Agents v2 délivre agent.message d'un seul bloc)
   const typewriterQueue = useRef<string[]>([]);
@@ -75,6 +78,8 @@ export function useSession() {
       } catch {
         return;
       }
+      // Track activity timestamp pour afficher l'âge du silence côté UI
+      setLastEventAt(Date.now());
       handleEvent(data);
     };
   }
@@ -376,6 +381,7 @@ export function useSession() {
     messages,
     status,
     error,
+    lastEventAt,
     appendUserMessage,
     newSession,
   };
