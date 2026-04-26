@@ -78,9 +78,16 @@ jobs:
           echo "→ Status:"
           docker compose -f docker-compose.local.yml ps
           echo "→ Traefik labels (server):"
-          docker inspect cms-lab-agent-server-1 --format '{{json .Config.Labels}}' 2>/dev/null | python3 -m json.tool 2>/dev/null | grep -E "middleware|users|router" | head -10 || true
-          echo "→ Traefik logs (last 30 lines):"
-          docker logs traefik-traefik-1 --tail 30 2>&1 | grep -iE "error|editor-auth|agent-" | tail -20 || true
+          docker inspect cms-lab-agent-server-1 \
+            --format '{{range $k, $v := .Config.Labels}}{{$k}}={{$v}}|{{end}}' 2>&1 | tr '|' '\n' | grep -E "middleware|users|router" | head -15 || true
+          echo "→ All running containers:"
+          docker ps --format '{{.Names}} {{.Image}}'
+          TRAEFIK=$(docker ps --format '{{.Names}}' | grep -i traefik | head -1)
+          echo "→ Traefik container: $TRAEFIK"
+          if [ -n "$TRAEFIK" ]; then
+            echo "→ Traefik logs (errors + editor-auth refs):"
+            docker logs "$TRAEFIK" --tail 100 2>&1 | grep -iE "error|editor-auth|agent-server|agent-web" | tail -15 || true
+          fi
           EOF
 
       - name: Smoke test
