@@ -65,7 +65,14 @@ export function App() {
     }
     return null;
   }, [messages]);
-  const [mode, setMode] = useState<Mode>("validate");
+  const [mode, setMode] = useState<Mode>(() => {
+    if (typeof localStorage === "undefined") return "auto";
+    const saved = localStorage.getItem("mode");
+    return saved === "validate" || saved === "auto" ? saved : "auto";
+  });
+  useEffect(() => {
+    if (typeof localStorage !== "undefined") localStorage.setItem("mode", mode);
+  }, [mode]);
   const [pendingDraft, setPendingDraft] = useState<WpDraft | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
@@ -87,10 +94,11 @@ export function App() {
         const key = `${m.id}#${i}`;
         if (handledDrafts.current.has(key)) continue;
         handledDrafts.current.add(key);
-        publishDraft(drafts[i])
+        // En mode auto on force status: "publish" — l'agent peut avoir mis "draft"
+        publishDraft({ ...drafts[i], status: "publish" })
           .then((post) =>
             setToast(
-              `${drafts[i].action === "create" ? "Créé" : "Mis à jour"} · ${post.link || `#${post.id}`}`,
+              `${drafts[i].action === "create" ? "Publié" : "Mis à jour"} · ${post.link || `#${post.id}`}`,
             ),
           )
           .catch((err) => setToast(`Erreur · ${err.message}`));
