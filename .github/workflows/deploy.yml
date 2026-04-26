@@ -1,0 +1,53 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+      - "claude/bootstrap-project-BsFvC"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy
+        env:
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          ssh -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" bash -se <<EOF
+          set -euo pipefail
+          cd /opt/managed-agents
+          git fetch origin "$BRANCH"
+          git checkout "$BRANCH"
+          git reset --hard "origin/$BRANCH"
+          cd deploy
+          docker compose -f docker-compose.local.yml --env-file .env up -d --build
+          echo "→ Status:"
+          docker compose -f docker-compose.local.yml ps
+          EOF
+
+      - name: Smoke test
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          # Petit délai pour que les containers redémarrent
+          sleep 8
+          echo "→ Health check"
+          curl -fsS --max-time 30 "https://agent.${VPS_HOST}.nip.io/api/health" | tee /tmp/health.json
+          grep -q '"ok":true' /tmp/health.json
