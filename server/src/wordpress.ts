@@ -211,7 +211,26 @@ export async function uploadMedia(opts: {
   };
 }
 
+// Anti-duplicate guard: même slug POSTé < 60s → on retourne le post déjà créé.
+// Évite le scénario où l'agent fait à la fois curl POST + émet un bloc wp-post
+// que le frontend en mode auto-publie aussi (résultat: 2 articles identiques).
+const recentBySlug = new Map<string, { id: number; link: string; ts: number }>();
+const DEDUP_WINDOW_MS = 60_000;
+
 export async function createPost(input: WpPostInput) {
+  const slug = input.slug;
+  if (slug) {
+    const prev = recentBySlug.get(slug);
+    if (prev && Date.now() - prev.ts < DEDUP_WINDOW_MS) {
+      console.warn(
+        `[wp] dedup: slug="${slug}" déjà créé il y a ${Math.round(
+          (Date.now() - prev.ts) / 1000,
+        )}s → retour du post existant ${prev.id}`,
+      );
+      return { id: prev.id, link: prev.link, _deduped: true } as any;
+    }
+  }
+
   const body: Record<string, unknown> = { ...input };
   if (input.tags) body.tags = await resolveTagIds(input.tags);
 
@@ -224,7 +243,11 @@ export async function createPost(input: WpPostInput) {
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`WP create failed (${res.status}): ${await res.text()}`);
-  return res.json();
+  const result = (await res.json()) as { id: number; link: string };
+  if (slug) {
+    recentBySlug.set(slug, { id: result.id, link: result.link, ts: Date.now() });
+  }
+  return result;
 }
 
 export async function updatePost(id: number, input: WpPostInput) {

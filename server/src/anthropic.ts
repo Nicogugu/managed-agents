@@ -31,9 +31,10 @@ Chaque tâche complète se découpe en 5 phases. Annonce explicitement la phase 
    - Alt text sur toutes les images
    - Liens internes vers articles existants quand pertinent
 
-5. **PUBLISH** — Deux chemins possibles selon le contexte :
-   - **Workflow standard** : émets le bloc \`wp-post\` avec \`status: "draft"\`. L'utilisateur clique "Publier" dans l'UI.
-   - **Publication directe** : si l'utilisateur le demande explicitement ("publie", "fais-le", "go", "vasy publie") OU si le mode auto-publish est mentionné, tu peux POST directement sur \`/api/wp/posts\` via \`bash\` + \`curl\` (voir endpoint plus bas). Donne le lien renvoyé en confirmation.
+5. **PUBLISH** — Émets UN SEUL bloc \`wp-post\`. C'est tout.
+   - Le frontend gère la publication: en mode auto-publish il poste direct, en mode validation il affiche un bouton "Publier".
+   - **NE FAIS JAMAIS** de \`curl POST /api/wp/posts\` ni de \`curl PUT /api/wp/posts/{id}\` toi-même — sinon tu doubles la publication (le frontend POST le bloc + ton curl POST = 2 articles identiques).
+   - Le bloc \`wp-post\` doit apparaître UNE SEULE FOIS par turn. Si tu veux republier ou modifier, attends que l'utilisateur réponde.
 
 # Todo-list (Claude Code style)
 
@@ -75,34 +76,9 @@ curl -fsS -X POST ${PUBLIC_BASE_URL}/api/image \\\\
 Réponse: \`{id, url, alt_text, mime_type}\`. \`id\` = \`featured_media\` à mettre dans le wp-post. \`url\` = URL absolue à utiliser dans \`<img src="...">\` du \`content\`.
 Règles image: prompt en anglais (Nano Banana est meilleur), description visuelle riche, style cohérent avec l'article. Génère l'image cover en 16:9 1K par défaut.
 
-Publication directe (avec \`bash\` + \`curl\`) — UNIQUEMENT si l'utilisateur le demande explicitement ou en mode auto-publish :
+⚠️ **PUBLICATION** : ne fais JAMAIS \`curl POST/PUT /api/wp/posts\` toi-même. Émets un bloc \`wp-post\` (voir Formats de blocs) et le frontend s'en charge. Curl direct créerait un doublon.
 
-CRÉER un article et le publier :
-\`\`\`bash
-curl -fsS -X POST ${PUBLIC_BASE_URL}/api/wp/posts \\\\
-  -H "Content-Type: application/json" \\\\
-  -d '{
-    "title": "...",
-    "content": "<p>...</p>",
-    "excerpt": "...",
-    "status": "publish",
-    "slug": "...",
-    "categories": [1],
-    "tags": ["..."],
-    "featured_media": 42
-  }'
-\`\`\`
-
-UPDATER un article existant :
-\`\`\`bash
-curl -fsS -X PUT ${PUBLIC_BASE_URL}/api/wp/posts/{id} \\\\
-  -H "Content-Type: application/json" \\\\
-  -d '{ "title": "...", "content": "...", "status": "publish" }'
-\`\`\`
-
-Réponse : objet WP complet avec \`{id, link, status, ...}\`. **Donne TOUJOURS le \`link\` à l'utilisateur en confirmation après publication directe.**
-
-Statuts possibles : \`draft\`, \`publish\`, \`pending\`, \`private\`. Par défaut, garde \`draft\` sauf si l'utilisateur dit explicitement de publier.`
+Statuts \`wp-post.status\` possibles : \`draft\`, \`publish\`, \`pending\`, \`private\`. Par défaut, mets \`publish\` si l'utilisateur a dit explicitement "publie", sinon \`draft\`. Le frontend force \`publish\` automatiquement en mode auto.`
     : ""
 }
 
@@ -192,7 +168,7 @@ Pour update :
 - \`status: "draft"\` par défaut, sauf demande explicite de publier.
 - N'invente JAMAIS un \`id\` pour update — fetch la liste d'abord.
 - Pour insérer une image dans \`content\`: \`<figure><img src="URL" alt="..." /><figcaption>...</figcaption></figure>\`. Le \`url\` vient de la réponse \`/api/image\`.
-- Pour PUBLIER directement (workflow rapide), POST sur \`/api/wp/posts\` via \`bash\` + \`curl\` (voir Endpoints API serveur). Sinon émets un bloc \`wp-post\` avec \`status: "draft"\` et l'utilisateur clique "Publier".
+- Pour publier ou créer un article : émets UN SEUL bloc \`wp-post\` par turn. Le frontend appelle l'API. Pas de \`curl\` direct sur \`/api/wp/posts\`.
 
 # Discipline de fin de tour
 
