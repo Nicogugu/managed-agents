@@ -35,16 +35,43 @@ async function startPump(sessionId: string): Promise<void> {
   const state = getStreamState(sessionId);
   if (state.pumpStarted) return;
   state.pumpStarted = true;
+
+  // Dédup par event id Anthropic pour absorber les recouvrements entre
+  // events.list (backfill) et events.stream (live).
+  const seenAnthropicIds = new Set<string>();
+  const pushEvent = (ev: any) => {
+    if (ev?.id && seenAnthropicIds.has(ev.id)) return;
+    if (ev?.id) seenAnthropicIds.add(ev.id);
+    const seq = state.events.length + 1;
+    const item: BufferedEvent = { id: seq, data: ev };
+    state.events.push(item);
+    if (state.events.length > MAX_BUFFERED_EVENTS) {
+      state.events.splice(0, state.events.length - MAX_BUFFERED_EVENTS);
+    }
+    for (const listener of state.listeners) listener(item);
+  };
+
   try {
+    // 1. Backfill: replay l'historique complet de la session (utile après
+    //    redéploiement du server: events.stream ne renvoie pas le passé).
+    try {
+      for await (const ev of (client.beta as any).sessions.events.list(
+        sessionId,
+        { order: "asc" },
+      )) {
+        pushEvent(ev);
+      }
+      console.log(
+        `[pump:${sessionId}] backfilled ${state.events.length} past events`,
+      );
+    } catch (err: any) {
+      console.warn(`[pump:${sessionId}] backfill failed:`, err?.message);
+    }
+
+    // 2. Live stream
     const stream = await client.beta.sessions.events.stream(sessionId);
     for await (const ev of stream as any) {
-      const id = state.events.length + 1;
-      const item: BufferedEvent = { id, data: ev };
-      state.events.push(item);
-      if (state.events.length > MAX_BUFFERED_EVENTS) {
-        state.events.splice(0, state.events.length - MAX_BUFFERED_EVENTS);
-      }
-      for (const listener of state.listeners) listener(item);
+      pushEvent(ev);
     }
   } catch (err: any) {
     console.error(`[pump:${sessionId}] error:`, err?.message);
