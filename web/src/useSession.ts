@@ -4,7 +4,13 @@ import { createSession } from "./api";
 
 type ServerEvent =
   | { type: "agent.message"; content: Array<{ type: "text"; text: string }> }
-  | { type: "agent.tool_use"; name: string; id?: string }
+  | {
+      type: "agent.tool_use";
+      name?: string;
+      id?: string;
+      input?: Record<string, any>;
+      tool_use?: { name?: string; input?: Record<string, any> };
+    }
   | { type: "agent.tool_result"; tool_use_id?: string }
   | { type: "session.status_idle" }
   | { type: "session.status_running" }
@@ -85,7 +91,9 @@ export function useSession() {
         break;
       }
       case "agent.tool_use": {
-        appendToolCall(ev.name);
+        const name = (ev as any).name || (ev as any).tool_use?.name;
+        const input = (ev as any).input || (ev as any).tool_use?.input;
+        if (name) appendToolCall(name, input);
         break;
       }
       case "agent.tool_result": {
@@ -123,12 +131,18 @@ export function useSession() {
     );
   }
 
-  function appendToolCall(name: string) {
+  function appendToolCall(name: string, input?: Record<string, any>) {
     const id = ensureAssistantMessage();
     setMessages((prev) =>
       prev.map((m) =>
         m.id === id && m.role === "assistant"
-          ? { ...m, toolCalls: [...m.toolCalls, { name, status: "running" }] }
+          ? {
+              ...m,
+              toolCalls: [
+                ...m.toolCalls,
+                { name, status: "running", input },
+              ],
+            }
           : m,
       ),
     );

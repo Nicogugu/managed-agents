@@ -312,16 +312,9 @@ function MessageBubble({
   return (
     <div className="flex flex-col gap-2 max-w-[92%] sm:max-w-[85%]">
       {message.toolCalls.length > 0 && (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-col gap-1">
           {message.toolCalls.map((t, i) => (
-            <span
-              key={i}
-              className={`pill ${t.status === "running" ? "pill-running" : ""}`}
-            >
-              <ToolIcon name={t.name} />
-              {t.name}
-              {t.status === "running" && <span className="opacity-60">…</span>}
-            </span>
+            <ToolCallRow key={i} call={t} />
           ))}
         </div>
       )}
@@ -356,6 +349,78 @@ function ToolIcon({ name }: { name: string }) {
     web_fetch: "↓",
   };
   return <span className="font-mono text-[10px] mr-0.5 opacity-70">{icons[name] || "•"}</span>;
+}
+
+function summarizeTool(call: { name: string; input?: Record<string, any> }): string {
+  const i = call.input || {};
+  switch (call.name) {
+    case "bash":
+      return i.command || "";
+    case "web_fetch":
+      return i.url || "";
+    case "web_search":
+      return i.query || "";
+    case "read":
+    case "write":
+    case "edit":
+      return i.path || i.file_path || "";
+    case "glob":
+      return i.pattern || "";
+    case "grep":
+      return [i.pattern, i.path].filter(Boolean).join("  in  ");
+    default:
+      // Generic: take first scalar value
+      const val = Object.values(i).find(
+        (v) => typeof v === "string" || typeof v === "number",
+      );
+      return val ? String(val) : "";
+  }
+}
+
+function ToolCallRow({
+  call,
+}: {
+  call: { name: string; status: "running" | "done"; input?: Record<string, any> };
+}) {
+  const [open, setOpen] = useState(false);
+  const summary = summarizeTool(call);
+  const hasInput = call.input && Object.keys(call.input).length > 0;
+  return (
+    <div className="text-xs">
+      <button
+        type="button"
+        onClick={() => hasInput && setOpen((o) => !o)}
+        className={`flex items-start gap-2 w-full text-left px-2 py-1 rounded-md border transition-colors ${
+          call.status === "running"
+            ? "border-amber-500/30 bg-amber-500/5"
+            : "border-border bg-bg-tertiary/40 hover:bg-bg-tertiary"
+        }`}
+      >
+        <span className="flex items-center gap-1 flex-shrink-0">
+          <ToolIcon name={call.name} />
+          <span className="font-mono text-text-secondary">{call.name}</span>
+          {call.status === "running" ? (
+            <span className="text-amber-400 animate-pulse">…</span>
+          ) : (
+            <span className="text-emerald-500">✓</span>
+          )}
+        </span>
+        {summary && (
+          <span className="font-mono text-text-tertiary truncate flex-1 min-w-0">
+            {summary}
+          </span>
+        )}
+        {hasInput && (
+          <span className="text-text-muted flex-shrink-0">{open ? "▾" : "▸"}</span>
+        )}
+      </button>
+      {open && hasInput && (
+        <pre className="mt-1 ml-4 p-2 rounded-md bg-bg-primary border border-border text-[11px] text-text-secondary font-mono whitespace-pre-wrap break-all max-h-60 overflow-auto">
+          {JSON.stringify(call.input, null, 2)}
+        </pre>
+      )}
+    </div>
+  );
 }
 
 function DraftCard({

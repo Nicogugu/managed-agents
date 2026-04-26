@@ -5,6 +5,7 @@ export type ChatMessage =
 export type ToolCall = {
   name: string;
   status: "running" | "done";
+  input?: Record<string, any>;
 };
 
 export type WpDraft = {
