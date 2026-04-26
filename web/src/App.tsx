@@ -542,6 +542,13 @@ function EmptyState({
         "Je veux créer une nouvelle brand voice à partir d'URLs. Émets un bloc ```ask``` pour me demander : (1) quel type de page (article, tutorial, news, comparison, case-study, ou un nouveau slug à inventer) (2) ensuite je te donnerai 1 à 3 URLs d'articles dont j'aime le style. Tu les fetcheras, analyseras le ton/structure/vocabulaire, et écriras le résultat dans /mnt/memory/voices/{slug}.md avec sections Ton, Structure, Vocabulaire, Exemples, Quand l'utiliser.",
     },
     {
+      emoji: "📒",
+      label: "Mes préférences / leçons",
+      description: "Voir et éditer les règles cumulées que tu m'as apprises (chargées auto à chaque session)",
+      value:
+        "Lis /mnt/memory/wp-editor-knowledge/lessons.md et affiche-moi son contenu actuel. Ensuite émets un bloc ```ask``` pour que je puisse choisir : (a) ajouter une nouvelle règle, (b) supprimer une règle existante, (c) tout est bon, on continue.",
+    },
+    {
       emoji: "🖼️",
       label: "Génère juste une image",
       description: "Sans article, juste une image dans WP Media",
