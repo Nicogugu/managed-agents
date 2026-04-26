@@ -190,7 +190,7 @@ export function useSession() {
     currentAssistantId.current = id;
     setMessages((prev) => [
       ...prev,
-      { id, role: "assistant", text: "", toolCalls: [] },
+      { id, role: "assistant", blocks: [] },
     ]);
     return id;
   }
@@ -237,14 +237,26 @@ export function useSession() {
     tick();
   }
 
+  // Texte: on append au dernier block "text" pour préserver l'ordre
+  // chronologique tool/text/tool/text. Si le dernier block est un tool,
+  // on push un nouveau block text.
   function appendAssistantText(text: string) {
     const id = ensureAssistantMessage();
     setMessages((prev) =>
-      prev.map((m) =>
-        m.id === id && m.role === "assistant"
-          ? { ...m, text: m.text + text }
-          : m,
-      ),
+      prev.map((m) => {
+        if (m.id !== id || m.role !== "assistant") return m;
+        const last = m.blocks[m.blocks.length - 1];
+        if (last?.type === "text") {
+          return {
+            ...m,
+            blocks: [
+              ...m.blocks.slice(0, -1),
+              { type: "text", text: last.text + text },
+            ],
+          };
+        }
+        return { ...m, blocks: [...m.blocks, { type: "text", text }] };
+      }),
     );
   }
 
@@ -255,9 +267,9 @@ export function useSession() {
         m.id === id && m.role === "assistant"
           ? {
               ...m,
-              toolCalls: [
-                ...m.toolCalls,
-                { name, status: "running", input },
+              blocks: [
+                ...m.blocks,
+                { type: "tool", call: { name, status: "running", input } },
               ],
             }
           : m,
@@ -271,12 +283,16 @@ export function useSession() {
     setMessages((prev) =>
       prev.map((m) => {
         if (m.id !== id || m.role !== "assistant") return m;
-        const idx = [...m.toolCalls].reverse().findIndex((t) => t.status === "running");
-        if (idx === -1) return m;
-        const realIdx = m.toolCalls.length - 1 - idx;
-        const next = [...m.toolCalls];
-        next[realIdx] = { ...next[realIdx], status: "done" };
-        return { ...m, toolCalls: next };
+        // Trouve le dernier block tool en status running
+        for (let i = m.blocks.length - 1; i >= 0; i--) {
+          const b = m.blocks[i];
+          if (b.type === "tool" && b.call.status === "running") {
+            const next = [...m.blocks];
+            next[i] = { type: "tool", call: { ...b.call, status: "done" } };
+            return { ...m, blocks: next };
+          }
+        }
+        return m;
       }),
     );
   }

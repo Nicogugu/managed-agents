@@ -1,12 +1,26 @@
-export type ChatMessage =
-  | { id: string; role: "user"; text: string }
-  | { id: string; role: "assistant"; text: string; toolCalls: ToolCall[] };
-
 export type ToolCall = {
   name: string;
   status: "running" | "done";
   input?: Record<string, any>;
 };
+
+export type MessageBlock =
+  | { type: "text"; text: string }
+  | { type: "tool"; call: ToolCall };
+
+export type ChatMessage =
+  | { id: string; role: "user"; text: string }
+  | { id: string; role: "assistant"; blocks: MessageBlock[] };
+
+export function assistantText(m: ChatMessage): string {
+  if (m.role !== "assistant") return "";
+  return m.blocks.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
+}
+
+export function assistantToolCalls(m: ChatMessage): ToolCall[] {
+  if (m.role !== "assistant") return [];
+  return m.blocks.flatMap((b) => (b.type === "tool" ? [b.call] : []));
+}
 
 export type WpDraft = {
   action: "create" | "update";

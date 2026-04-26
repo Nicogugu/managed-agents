@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSession } from "./useSession";
@@ -11,7 +11,16 @@ import {
   stripBlocks,
 } from "./parseDraft";
 import { PublishModal } from "./PublishModal";
-import type { ChatMessage, Mode, TodoItem, WpAsk, WpDraft, WpPlan } from "./types";
+import {
+  type ChatMessage,
+  type Mode,
+  type TodoItem,
+  type WpAsk,
+  type WpDraft,
+  type WpPlan,
+  assistantText,
+  assistantToolCalls,
+} from "./types";
 
 type Health = { ok: boolean; anthropicKey: boolean; wpConfigured: boolean };
 
@@ -27,7 +36,7 @@ export function App() {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
       if (m.role !== "assistant") continue;
-      const t = extractTodos(m.text);
+      const t = extractTodos(assistantText(m));
       if (t.length > 0) return t;
     }
     return [];
@@ -41,7 +50,7 @@ export function App() {
       const m = messages[i];
       if (m.role !== "assistant") continue;
       // 1. Outil en cours : affiche son nom + argument principal
-      const running = [...m.toolCalls].reverse().find((t) => t.status === "running");
+      const running = [...assistantToolCalls(m)].reverse().find((t) => t.status === "running");
       if (running) {
         const summary = summarizeToolForLine(running);
         return {
@@ -51,10 +60,11 @@ export function App() {
         };
       }
       // 2. Texte qui stream : affiche les derniers caractères tapés
-      if (m.text) {
+      const fullText = assistantText(m);
+      if (fullText) {
         // Garde le tail du texte, sans blocs JSON ni syntaxe markdown brute
         // (**, ##, `, [...](...)) qui pollue l'affichage mono-ligne.
-        const visible = m.text
+        const visible = fullText
           .replace(/```[\s\S]*?```/g, "")
           .replace(/^#{1,6}\s+/gm, "")
           .replace(/\*\*([^*]+)\*\*/g, "$1")
@@ -79,7 +89,7 @@ export function App() {
       const m = messages[i];
       if (m.role !== "assistant") continue;
       // Tolère le markdown bold autour du nom de phase: "Phase: **PLAN**" ou "Phase: PLAN"
-      const match = m.text.match(/Phase\s*:?\s*\*{0,2}\s*(DISCOVER|PLAN|DRAFT|REVIEW|PUBLISH)\s*\*{0,2}/i);
+      const match = assistantText(m).match(/Phase\s*:?\s*\*{0,2}\s*(DISCOVER|PLAN|DRAFT|REVIEW|PUBLISH)\s*\*{0,2}/i);
       if (match) return match[1].toUpperCase();
     }
     return null;
@@ -108,7 +118,7 @@ export function App() {
     if (mode !== "auto") return;
     for (const m of messages) {
       if (m.role !== "assistant") continue;
-      const drafts = extractDrafts(m.text);
+      const drafts = extractDrafts(assistantText(m));
       for (let i = 0; i < drafts.length; i++) {
         const key = `${m.id}#${i}`;
         if (handledDrafts.current.has(key)) continue;
@@ -555,49 +565,83 @@ function MessageBubble({
     );
   }
 
-  const drafts = useMemo(() => extractDrafts(message.text), [message.text]);
-  const plans = useMemo(() => extractPlans(message.text), [message.text]);
-  const asks = useMemo(() => extractAsks(message.text), [message.text]);
-  const visibleText = useMemo(() => stripBlocks(message.text), [message.text]);
+  // Texte cumulé pour extraire les blocs spéciaux (wp-plan, wp-post, ask).
+  // Note: ces extracteurs s'appliquent au texte total, pas par block —
+  // l'agent peut splitter un bloc JSON sur plusieurs events texte.
+  const fullText = useMemo(() => assistantText(message), [message]);
+  const drafts = useMemo(() => extractDrafts(fullText), [fullText]);
+  const plans = useMemo(() => extractPlans(fullText), [fullText]);
+  const asks = useMemo(() => extractAsks(fullText), [fullText]);
+
+  // On compte les indices au fil de l'eau pour mapper les Draft/Plan/Ask
+  // au bon ordre du flux et garder le keying stable.
+  let draftIdx = 0;
+  let planIdx = 0;
+  let askIdx = 0;
 
   return (
     <div className="flex flex-col gap-2 max-w-[92%] sm:max-w-[85%]">
-      {message.toolCalls.length > 0 && (
-        <div className="flex flex-col gap-1">
-          {message.toolCalls.map((t, i) => (
-            <ToolCallRow key={i} call={t} />
-          ))}
-        </div>
-      )}
-
-      {visibleText && (
-        <div className="surface rounded-2xl rounded-bl-md px-3.5 py-2.5 text-md leading-relaxed text-text-primary markdown-body">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{visibleText}</ReactMarkdown>
-        </div>
-      )}
-
-      {plans.map((plan, i) => (
-        <PlanCard key={`plan-${i}`} plan={plan} onApprove={onApprovePlan} disabled={disabled} />
-      ))}
-
-      {drafts.map((draft, i) => (
-        <DraftCard
-          key={i}
-          draft={draft}
-          mode={mode}
-          onPublish={() => onPublish(draft)}
-        />
-      ))}
-
-      {asks.map((ask, i) => (
-        <AskCard
-          key={`ask-${i}`}
-          ask={ask}
-          onClick={(label, value) => onAnswerAsk(i, label, value)}
-          answered={askAnsweredFor(i)}
-          disabled={disabled}
-        />
-      ))}
+      {message.blocks.map((block, i) => {
+        if (block.type === "tool") {
+          return <ToolCallRow key={`b-${i}`} call={block.call} />;
+        }
+        // Block texte — on extrait les éléments spéciaux qu'il contient pour
+        // les rendre comme cartes spécialisées DANS l'ordre chronologique,
+        // et on affiche le texte restant en bulle markdown.
+        const blockDrafts = extractDrafts(block.text);
+        const blockPlans = extractPlans(block.text);
+        const blockAsks = extractAsks(block.text);
+        const visible = stripBlocks(block.text);
+        const elements: JSX.Element[] = [];
+        if (visible) {
+          elements.push(
+            <div
+              key={`b-${i}-text`}
+              className="surface rounded-2xl rounded-bl-md px-3.5 py-2.5 text-md leading-relaxed text-text-primary markdown-body"
+            >
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{visible}</ReactMarkdown>
+            </div>,
+          );
+        }
+        for (const plan of blockPlans) {
+          const idx = planIdx++;
+          elements.push(
+            <PlanCard
+              key={`b-${i}-plan-${idx}`}
+              plan={plan}
+              onApprove={onApprovePlan}
+              disabled={disabled}
+            />,
+          );
+        }
+        for (const draft of blockDrafts) {
+          const idx = draftIdx++;
+          elements.push(
+            <DraftCard
+              key={`b-${i}-draft-${idx}`}
+              draft={draft}
+              mode={mode}
+              onPublish={() => onPublish(draft)}
+            />,
+          );
+        }
+        for (const ask of blockAsks) {
+          const idx = askIdx++;
+          elements.push(
+            <AskCard
+              key={`b-${i}-ask-${idx}`}
+              ask={ask}
+              onClick={(label, value) => onAnswerAsk(idx, label, value)}
+              answered={askAnsweredFor(idx)}
+              disabled={disabled}
+            />,
+          );
+        }
+        return <Fragment key={`b-${i}`}>{elements}</Fragment>;
+      })}
+      {/* Si l'agent a émis du texte/blocs hors d'un block (impossible
+          actuellement) on aurait un fallback ici — laissé vide pour l'instant. */}
+      {void [drafts, plans, asks]}
     </div>
   );
 }
