@@ -434,6 +434,13 @@ function EmptyState({
     },
     {
       emoji: "🎨",
+      label: "Crée une brand voice depuis URLs",
+      description: "Donne 1-3 URLs d'articles dont tu aimes le style → l'agent en fait un guide réutilisable",
+      value:
+        "Je veux créer une nouvelle brand voice à partir d'URLs. Émets un bloc ```ask``` pour me demander : (1) quel type de page (article, tutorial, news, comparison, case-study, ou un nouveau slug à inventer) (2) ensuite je te donnerai 1 à 3 URLs d'articles dont j'aime le style. Tu les fetcheras, analyseras le ton/structure/vocabulaire, et écriras le résultat dans /mnt/memory/voices/{slug}.md avec sections Ton, Structure, Vocabulaire, Exemples, Quand l'utiliser.",
+    },
+    {
+      emoji: "🖼️",
       label: "Génère juste une image",
       description: "Sans article, juste une image dans WP Media",
       value:

@@ -6,11 +6,42 @@ const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || "";
 
 const SYSTEM_PROMPT = `Tu es **Article Code**, un agent éditorial pour WordPress qui travaille comme Claude Code mais pour des articles. Tu décomposes les tâches, tiens une todo-list, raisonnes par phases, et confirmes systématiquement la fin d'un tour.
 
+# Mémoire persistante (CRITIQUE)
+
+Tu as une mémoire éditoriale persistante montée sur \`/mnt/memory/\` (read-write,
+survit entre sessions). Elle contient le positionnement du site, l'audience, le
+style, les brand voices par type de page, l'index des articles publiés, et les
+leçons apprises de feedbacks utilisateurs.
+
+**Au début de chaque phase DISCOVER, lis OBLIGATOIREMENT :**
+- \`/mnt/memory/README.md\` (workflow + arborescence)
+- \`/mnt/memory/site.md\` (positionnement)
+- \`/mnt/memory/audience.md\` (lecteur cible)
+- \`/mnt/memory/style/voice.md\` + \`/style/banned.md\` + \`/style/preferred.md\`
+
+**Avant de drafter, charge la brand voice du type de page :**
+- \`/mnt/memory/voices/article.md\` (par défaut, fond technique)
+- \`/mnt/memory/voices/tutorial.md\`
+- \`/mnt/memory/voices/news.md\`
+- \`/mnt/memory/voices/comparison.md\`
+- \`/mnt/memory/voices/case-study.md\`
+
+**Si l'utilisateur demande de créer une nouvelle brand voice :**
+1. Demande-lui via \`ask\` 1 à 3 URLs d'articles dont il aime le style
+2. \`web_fetch\` chaque URL
+3. Analyse le ton, structure, vocabulaire, hooks d'intro/conclusion
+4. Écris le résultat dans \`/mnt/memory/voices/{slug}.md\` avec sections : Ton, Structure, Vocabulaire, Exemples, Quand l'utiliser
+
+**Mise à jour de la mémoire (REVIEW / fin de tâche) :**
+- Article publié → ajoute une ligne à \`/mnt/memory/articles/index.md\`
+- Feedback utilisateur ("plus comme ça", "fais plutôt X") → ajoute à \`/mnt/memory/lessons.md\`
+
 # Workflow par phases
 
 Chaque tâche complète se découpe en 5 phases. Annonce explicitement la phase courante.
 
 1. **DISCOVER** — Comprendre la demande, scanner l'existant
+   - Lis la mémoire (voir section ci-dessus)
    - Cherche les doublons WP (\`GET /api/wp/posts?search=mot-clé\`)
    - Recherche web pour 3-5 sources fraîches si pertinent
    - Liste les catégories/tags WP existants si tu vas en attribuer
@@ -21,6 +52,7 @@ Chaque tâche complète se découpe en 5 phases. Annonce explicitement la phase 
    - L'utilisateur peut amender le plan, tu re-proposes
 
 3. **DRAFT** — Rédiger l'article HTML
+   - Identifie le type de page et lis la brand voice correspondante dans \`/mnt/memory/voices/\`
    - Utilise ta sandbox (\`write\`, \`edit\`) pour itérer sur des fichiers de brouillon si l'article est long
    - Génère les images via \`POST /api/image\` AVANT le wp-post final (les images doivent exister dans WP Media pour être référencées)
    - Émets le bloc \`wp-post\` final (JSON, voir format)
@@ -218,16 +250,331 @@ export async function getOrCreateEnvironment(): Promise<string> {
   return env.id;
 }
 
+const MEMORY_STORE_NAME = "wp-editor-knowledge";
+let cachedMemoryStoreId: string | null = process.env.MEMORY_STORE_ID || null;
+
+export async function getOrCreateMemoryStore(): Promise<string> {
+  if (cachedMemoryStoreId) return cachedMemoryStoreId;
+
+  // Idempotent: list existing stores by name avant de créer
+  try {
+    const existing = await client.beta.memoryStores.list({ include_archived: false } as any);
+    for await (const s of existing as any) {
+      if (s.name === MEMORY_STORE_NAME) {
+        cachedMemoryStoreId = s.id;
+        console.log(`[anthropic] memory store reused: ${s.id}`);
+        return s.id;
+      }
+    }
+  } catch (err: any) {
+    console.warn("[anthropic] memory list failed, will create:", err.message);
+  }
+
+  const store = await (client.beta as any).memoryStores.create({
+    name: MEMORY_STORE_NAME,
+    description:
+      "Knowledge base persistent du site WordPress: style éditorial, audience, brand voices par type de page, articles publiés, leçons apprises.",
+  });
+  cachedMemoryStoreId = store.id;
+  console.log(`[anthropic] memory store created: ${store.id}`);
+  await seedMemoryStore(store.id);
+  return store.id;
+}
+
+async function seedMemoryStore(storeId: string): Promise<void> {
+  const wpUrl = process.env.WP_BASE_URL || "<WP_BASE_URL>";
+  const seeds: Array<{ path: string; content: string }> = [
+    {
+      path: "/README.md",
+      content: `# Mémoire éditoriale persistante
+
+Site cible : ${wpUrl}
+
+Cette mémoire survit entre sessions. Tu DOIS la consulter au début de chaque
+phase DISCOVER et la mettre à jour à la fin des tâches significatives.
+
+## Workflow obligatoire
+
+1. **Phase DISCOVER**
+   - \`glob /mnt/memory/**/*.md\` pour voir ce qui existe
+   - Lis \`/mnt/memory/site.md\`, \`/mnt/memory/audience.md\`, \`/mnt/memory/style/voice.md\`
+   - Avant DRAFT : lis la brand voice du type de page (\`/mnt/memory/voices/{type}.md\`)
+
+2. **Phase REVIEW / fin de tâche**
+   - Si tu as appris quelque chose (user a dit "fais plutôt comme X") → ajoute à \`/mnt/memory/lessons.md\`
+   - Quand un article est publié → ajoute une ligne à \`/mnt/memory/articles/index.md\`
+
+## Arborescence
+
+- \`/mnt/memory/site.md\` — positionnement du site
+- \`/mnt/memory/audience.md\` — profil lecteur
+- \`/mnt/memory/style/voice.md\` — voix par défaut
+- \`/mnt/memory/style/banned.md\` — formulations à éviter
+- \`/mnt/memory/style/preferred.md\` — formulations préférées
+- \`/mnt/memory/voices/{article,tutorial,news,comparison,case-study}.md\` — brand voice par type de page
+- \`/mnt/memory/image-style.md\` — guidelines visuelles Nano Banana
+- \`/mnt/memory/articles/index.md\` — index des articles publiés (à mettre à jour)
+- \`/mnt/memory/lessons.md\` — leçons apprises de feedbacks utilisateurs
+
+## Brand voices par type de page
+
+Avant chaque DRAFT, identifie le **type de page** (article-fond, tutorial, news,
+comparison, case-study) et lis le fichier \`/mnt/memory/voices/{type}.md\`.
+
+L'utilisateur peut te demander de créer une nouvelle brand voice à partir d'URLs.
+Workflow : \`web_fetch\` les URLs → analyse le ton/structure/vocabulaire → écris
+le résultat dans \`/mnt/memory/voices/{nouveau-type}.md\` avec sections : Ton,
+Structure, Vocabulaire, Exemples, Quand l'utiliser.
+`,
+    },
+    {
+      path: "/site.md",
+      content: `# Positionnement du site
+
+(À enrichir au fur et à mesure que tu en apprends sur le site.)
+
+Initialement déduit de l'existant : carnet de bord d'expérimentation autour
+d'agents IA appliqués à la production de contenu, self-hosting de CMS
+(WordPress), infrastructure Docker + Traefik, comparatifs de stacks.
+
+Style général : "post-mortem" / "carnet de bord". On raconte ce qu'on a
+essayé, ce qui a marché ou pas, on partage la conf qui marche.
+`,
+    },
+    {
+      path: "/audience.md",
+      content: `# Profil lecteur
+
+(À enrichir.)
+
+Hypothèse initiale : développeurs / devops / indie-hackers qui auto-hébergent
+leurs CMS, expérimentent les agents IA, déploient sur VPS. Ils maîtrisent
+Docker, Traefik, Let's Encrypt — pas besoin d'expliquer les bases.
+`,
+    },
+    {
+      path: "/style/voice.md",
+      content: `# Voix éditoriale par défaut
+
+- Ton : direct, pragmatique, parfois ironique
+- Pronoms : "tu" (tutoiement), "on" pour 1ère personne du pluriel
+- Termes techniques en VO ("CMS", "rate limit", "reverse proxy"), reste en français
+- Phrases courtes > phrases longues
+- Pas de formules d'introduction creuses ("Dans cet article...", "En conclusion...")
+- Hooks d'intro qui posent le problème direct, pas de blabla
+`,
+    },
+    {
+      path: "/style/banned.md",
+      content: `# Formulations à éviter
+
+- "Dans cet article, nous allons voir..."
+- "En conclusion..."
+- "Il est important de noter que..."
+- "Force est de constater"
+- "Il convient de"
+- Adverbes en -ment qui n'apportent rien (totalement, complètement, etc.)
+- Anglicismes inutiles si un mot français existe ("checker" → "vérifier")
+`,
+    },
+    {
+      path: "/style/preferred.md",
+      content: `# Formulations préférées
+
+- "appartient au passé" plutôt que "est obsolète"
+- "sous le capot" plutôt que "techniquement parlant"
+- "à toi de jouer" en clôture
+- Code inline avec backticks pour les noms de fichiers, variables, commandes
+`,
+    },
+    {
+      path: "/image-style.md",
+      content: `# Style visuel pour Nano Banana
+
+- Format par défaut : 16:9, 1K
+- Palette : dark blue / teal, low-light cinématique
+- Compositions abstraites/symboliques > photos réalistes de personnes
+- Pas de texte dans l'image
+- Toujours prompter en anglais (Nano Banana est meilleur en anglais)
+- Mots-clés style : cinematic, modern tech illustration, ambient lighting, depth of field
+`,
+    },
+    {
+      path: "/articles/index.md",
+      content: `# Index des articles publiés
+
+(L'agent met à jour ce fichier après chaque publication.)
+
+Format : \`{id} | {YYYY-MM-DD} | {slug} | {résumé 1 phrase} | {tags}\`
+`,
+    },
+    {
+      path: "/lessons.md",
+      content: `# Leçons apprises
+
+(L'agent ajoute ici quand l'utilisateur dit "non plus comme ça" / "fais plutôt X" / corrige une erreur récurrente.)
+
+Format :
+## YYYY-MM-DD — {sujet court}
+**Contexte :** ce qu'on faisait
+**Règle :** ce qu'il faut faire à la place
+`,
+    },
+    {
+      path: "/voices/article.md",
+      content: `# Brand voice — Article de fond (par défaut)
+
+Pour les articles longs (>500 mots) qui creusent un sujet technique.
+
+## Ton
+Direct, opinionné, technique. On donne notre avis avec des arguments.
+
+## Structure
+- H1 = titre WP (pas dans le content)
+- Hook 2-3 phrases qui posent le problème
+- 3-4 H2 qui structurent
+- Conclusion ouverte (pas de "En conclusion")
+- 1 image cover 16:9
+
+## Vocabulaire
+- "tu", "on"
+- Termes techniques en VO
+- Pas de jargon corporate
+
+## Quand l'utiliser
+Sujet technique qui mérite un creusage : architecture, comparatif, post-mortem, choix tech.
+`,
+    },
+    {
+      path: "/voices/tutorial.md",
+      content: `# Brand voice — Tutorial pas-à-pas
+
+Pour les guides "comment faire X de A à Z".
+
+## Ton
+Direct, action-oriented. Pas de digressions.
+
+## Structure
+- H1 = "Comment {action}"
+- Intro courte : prérequis + résultat final
+- H2 par étape (numérotés ou pas)
+- Code blocks abondants, copier-collable
+- H2 final "Vérifier que ça marche"
+- Pas de conclusion : on s'arrête quand c'est terminé
+
+## Vocabulaire
+- "tu" tout le temps
+- Verbes à l'impératif : "ouvre", "lance", "vérifie"
+
+## Quand l'utiliser
+Setup d'un tool, déploiement, intégration step-by-step.
+`,
+    },
+    {
+      path: "/voices/news.md",
+      content: `# Brand voice — News / brève
+
+Pour les actus tech (200-400 mots).
+
+## Ton
+Factuel, légèrement ironique. On contextualise vite.
+
+## Structure
+- H1 = titre clickable mais pas trop putaclic
+- Lead 2 phrases : qui, quoi, pourquoi ça compte
+- 2-3 paragraphes : détails, contexte, prise de recul
+- Lien vers source officielle
+
+## Vocabulaire
+- Phrases courtes
+- Pas de hype gratuite ("révolutionnaire", "incroyable")
+
+## Quand l'utiliser
+Annonce produit, sortie de modèle, changement majeur dans un outil qu'on suit.
+`,
+    },
+    {
+      path: "/voices/comparison.md",
+      content: `# Brand voice — Comparatif
+
+Pour comparer 2-3 outils/approches sur le même sujet.
+
+## Ton
+Honnête, opinionné. On donne notre choix avec critères.
+
+## Structure
+- H1 = "X vs Y vs Z : {critère décisif}"
+- Intro : pourquoi cette comparaison maintenant
+- H2 par option : forces, faiblesses, when-to-use
+- H2 "Tableau récap" avec 4-6 critères
+- H2 "Notre choix" avec justification
+
+## Vocabulaire
+- Critères concrets et mesurables
+- Pas de "ça dépend" sans préciser de quoi
+
+## Quand l'utiliser
+Choix d'outil, choix d'approche tech, débat ouvert dans la commu.
+`,
+    },
+    {
+      path: "/voices/case-study.md",
+      content: `# Brand voice — Case study / retour d'expérience
+
+Pour raconter "on a fait X et voici ce qu'on a appris".
+
+## Ton
+Premier degré, narratif, sans cacher les ratés.
+
+## Structure
+- H1 = "Comment on a {résultat} avec {moyen}"
+- Contexte (pourquoi on s'est lancé)
+- Ce qu'on a essayé (chrono ou par thème)
+- Ce qui a marché / ce qui a foiré
+- Leçons + ce qu'on referait différemment
+
+## Vocabulaire
+- "on" / "nous"
+- Détails concrets : durées, coûts, métriques
+
+## Quand l'utiliser
+Migration, lancement de feature, expé qui mérite d'être documentée.
+`,
+    },
+  ];
+
+  for (const seed of seeds) {
+    try {
+      await (client.beta as any).memoryStores.memories.create(storeId, seed);
+    } catch (err: any) {
+      if (!String(err.message).match(/already exists|conflict/i)) {
+        console.error(`[memory seed] ${seed.path}:`, err.message);
+      }
+    }
+  }
+  console.log(`[anthropic] memory store seeded with ${seeds.length} files`);
+}
+
 export async function createSession(title: string) {
-  const [agentId, envId] = await Promise.all([
+  const [agentId, envId, memoryStoreId] = await Promise.all([
     getOrCreateAgent(),
     getOrCreateEnvironment(),
+    getOrCreateMemoryStore(),
   ]);
 
   const session = await client.beta.sessions.create({
     agent: agentId,
     environment_id: envId,
     title,
+    resources: [
+      {
+        type: "memory_store",
+        memory_store_id: memoryStoreId,
+        access: "read_write",
+        instructions:
+          "Mémoire éditoriale persistante du site. Lis /mnt/memory/README.md d'abord. Avant de drafter, charge la brand voice du type de page (/mnt/memory/voices/{type}.md). Mets à jour /articles/index.md à chaque publication et /lessons.md quand tu apprends quelque chose.",
+      },
+    ] as any,
   });
 
   return session;
