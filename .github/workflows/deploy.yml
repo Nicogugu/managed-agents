@@ -77,6 +77,10 @@ jobs:
           docker compose -f docker-compose.local.yml --env-file .env up -d --build
           echo "→ Status:"
           docker compose -f docker-compose.local.yml ps
+          echo "→ Traefik labels (server):"
+          docker inspect cms-lab-agent-server-1 --format '{{json .Config.Labels}}' 2>/dev/null | python3 -m json.tool 2>/dev/null | grep -E "middleware|users|router" | head -10 || true
+          echo "→ Traefik logs (last 30 lines):"
+          docker logs traefik-traefik-1 --tail 30 2>&1 | grep -iE "error|editor-auth|agent-" | tail -20 || true
           EOF
 
       - name: Smoke test
