@@ -99,16 +99,19 @@ Lecture (avec \`web_fetch\`) :
 - \`GET ${PUBLIC_BASE_URL}/api/wp/tags?search=mot\` — \`{tags: [...]}\`.
 - \`GET ${PUBLIC_BASE_URL}/api/wp/media\` — médias récents pour réutilisation.
 
-Génération d'image (avec \`bash\` + \`curl\`, c'est un POST):
-\`\`\`bash
-curl -fsS -X POST ${PUBLIC_BASE_URL}/api/image \\\\
-  -H "Content-Type: application/json" \\\\
-  -d '{"prompt":"...","alt_text":"...","aspect_ratio":"16:9","image_size":"1K"}'
-\`\`\`
-Réponse: \`{id, url, alt_text, mime_type}\`. \`id\` = \`featured_media\` à mettre dans le wp-post. \`url\` = URL absolue à utiliser dans \`<img src="...">\` du \`content\`.
-Règles image: prompt en anglais (Nano Banana est meilleur), description visuelle riche, style cohérent avec l'article. Génère l'image cover en 16:9 1K par défaut.
+## Custom tools natifs (préfère-les à bash+curl)
 
-⚠️ **PUBLICATION** : ne fais JAMAIS \`curl POST/PUT /api/wp/posts\` toi-même. Émets un bloc \`wp-post\` (voir Formats de blocs) et le frontend s'en charge. Curl direct créerait un doublon.
+- \`wp_image_generate({ prompt, alt_text?, aspect_ratio?, image_size?, title? })\`
+  → Génère une image via Nano Banana et l'upload dans WP Media. Retourne \`{id, url, alt_text, mime_type}\`.
+  → Prompt en anglais, style cinématique. \`id\` = \`featured_media\`, \`url\` = source pour \`<img src>\`.
+  → Évite \`bash curl\` pour ça : le tool natif est plus propre et plus rapide.
+
+- \`wp_publish({ action, id?, title, content, excerpt, slug, status, categories, tags, featured_media })\`
+  → Publie ou met à jour un article DIRECTEMENT. Status par défaut \`publish\`.
+  → À utiliser SEULEMENT si l'utilisateur demande explicitement publication immédiate.
+  → Sinon préfère le bloc \`wp-post\` (le frontend gère selon mode validation/auto).
+
+⚠️ **PUBLICATION (rappel)** : un seul bloc \`wp-post\` OU un seul appel \`wp_publish\` par turn — JAMAIS les deux (créerait un doublon).
 
 Statuts \`wp-post.status\` possibles : \`draft\`, \`publish\`, \`pending\`, \`private\`. Par défaut, mets \`publish\` si l'utilisateur a dit explicitement "publie", sinon \`draft\`. Le frontend force \`publish\` automatiquement en mode auto.`
     : ""
@@ -214,7 +217,78 @@ Ne termine JAMAIS un tour uniquement sur des appels d'outils — toujours par un
 
 Réponds en français. Sois concis. Sois rigoureux sur le workflow.`;
 
-const AGENT_NAME = "wp-editor";
+// Custom tools exposés à l'agent. Plus propre que bash+curl: chaque appel
+// donne un agent.custom_tool_use typé, le serveur l'exécute et renvoie
+// user.custom_tool_result. Évite les coûts de tokens du curl + parse JSON.
+export const CUSTOM_TOOLS = [
+  {
+    type: "custom" as const,
+    name: "wp_image_generate",
+    description:
+      "Génère une image via Gemini Nano Banana et l'upload dans WordPress Media Library. " +
+      "Retourne JSON {id, url, alt_text, mime_type}. Utilise `id` comme `featured_media` " +
+      "et `url` dans <img src> du content. Prompt EN ANGLAIS, style cinématique.",
+    input_schema: {
+      type: "object",
+      properties: {
+        prompt: {
+          type: "string",
+          description: "Prompt en anglais, descriptif visuel riche.",
+        },
+        alt_text: { type: "string", description: "Texte alternatif (FR ou EN selon site)." },
+        aspect_ratio: {
+          type: "string",
+          enum: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+        },
+        image_size: { type: "string", enum: ["512", "1K", "2K", "4K"] },
+        title: { type: "string", description: "Titre du média WP (optionnel)." },
+      },
+      required: ["prompt"],
+    },
+  },
+  {
+    type: "custom" as const,
+    name: "wp_publish",
+    description:
+      "Publie ou met à jour un article WordPress directement. À utiliser quand " +
+      "l'utilisateur demande explicitement de publier OU en mode auto-publish. " +
+      "Sinon émets un bloc wp-post (le frontend gère). Retourne JSON {id, link, status}.",
+    input_schema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["create", "update"] },
+        id: { type: "integer", description: "Requis si action=update." },
+        title: { type: "string" },
+        content: { type: "string", description: "HTML WordPress (<p>, <h2>, <img>...)." },
+        excerpt: { type: "string", description: "< 160 caractères." },
+        slug: { type: "string", description: "kebab-case." },
+        status: {
+          type: "string",
+          enum: ["draft", "publish", "pending", "private"],
+        },
+        categories: {
+          type: "array",
+          items: { type: "integer" },
+          description: "IDs WP.",
+        },
+        tags: {
+          type: "array",
+          items: { type: "string" },
+          description: "Noms (créés si absents).",
+        },
+        featured_media: {
+          type: "integer",
+          description: "id renvoyé par wp_image_generate.",
+        },
+      },
+      required: ["action"],
+    },
+  },
+];
+
+// Bumpé quand on change la composition des tools: la fonction de réutilisation
+// d'agent matche par nom, donc renommer force la création d'un agent neuf.
+const AGENT_NAME = "wp-editor-v2";
 // Défaut: Sonnet 4.6 standard — bon équilibre vitesse/coût/qualité.
 // Pour passer en Opus 4.6 + fast (premium): AGENT_MODEL=claude-opus-4-6 AGENT_SPEED=fast
 // Voir https://platform.claude.com/docs/en/managed-agents/agent-setup
@@ -235,8 +309,9 @@ export async function getOrCreateAgent(): Promise<string> {
         a.model?.id === AGENT_MODEL_ID && a.model?.speed === AGENT_MODEL_SPEED;
       if (a.name === AGENT_NAME && modelMatch && a.system === SYSTEM_PROMPT) {
         cachedAgentId = a.id;
+        cachedAgentVersion = a.version;
         console.log(
-          `[anthropic] agent reused: ${a.id} (${AGENT_MODEL_ID} speed=${AGENT_MODEL_SPEED})`,
+          `[anthropic] agent reused: ${a.id} v${a.version} (${AGENT_MODEL_ID} speed=${AGENT_MODEL_SPEED})`,
         );
         return a.id;
       }
@@ -249,10 +324,14 @@ export async function getOrCreateAgent(): Promise<string> {
     name: AGENT_NAME,
     model: { id: AGENT_MODEL_ID, speed: AGENT_MODEL_SPEED } as any,
     system: SYSTEM_PROMPT,
-    tools: [{ type: "agent_toolset_20260401" }],
+    tools: [
+      { type: "agent_toolset_20260401" },
+      ...CUSTOM_TOOLS,
+    ] as any,
   });
 
   cachedAgentId = agent.id;
+  cachedAgentVersion = agent.version;
   console.log(
     `[anthropic] agent created: ${agent.id} v${agent.version} (${AGENT_MODEL_ID} speed=${AGENT_MODEL_SPEED})`,
   );
@@ -614,6 +693,11 @@ Migration, lancement de feature, expé qui mérite d'être documentée.
   console.log(`[anthropic] memory store seeded/updated with ${seeds.length} files`);
 }
 
+// Cache la version courante de l'agent — résolue à getOrCreateAgent — pour
+// pouvoir pin la version sur session.create. Évite qu'une session active
+// drift quand on update l'agent en parallèle.
+let cachedAgentVersion: number | null = null;
+
 export async function createSession(title: string) {
   const [agentId, envId, memoryStoreId] = await Promise.all([
     getOrCreateAgent(),
@@ -621,8 +705,12 @@ export async function createSession(title: string) {
     getOrCreateMemoryStore(),
   ]);
 
+  const agentRef: any = cachedAgentVersion
+    ? { id: agentId, version: cachedAgentVersion }
+    : agentId;
+
   const session = await client.beta.sessions.create({
-    agent: agentId,
+    agent: agentRef,
     environment_id: envId,
     title,
     resources: [

@@ -140,7 +140,14 @@ export function useSession() {
         // Nouveau tour → on annule un éventuel idle différé d'un tour précédent
         pendingIdle.current = false;
         break;
-      case "session.status_idle":
+      case "session.status_idle": {
+        // Si la session est bloquée en attente d'un tool result (custom_tool_use,
+        // tool_confirmation), on reste en mode "running" côté UI — le serveur
+        // va dispatcher le tool puis Anthropic ré-emettra status_running.
+        const stopReason = (ev as any).stop_reason?.type;
+        if (stopReason === "requires_action") {
+          break;
+        }
         if (typewriterRunning.current) {
           // Le texte n'est pas encore totalement révélé — on diffère le passage en idle
           pendingIdle.current = true;
@@ -149,6 +156,7 @@ export function useSession() {
           currentAssistantId.current = null;
         }
         break;
+      }
       case "agent.message": {
         const text = (ev.content || [])
           .filter((b: any) => b.type === "text")
@@ -165,13 +173,15 @@ export function useSession() {
         }
         break;
       }
-      case "agent.tool_use": {
+      case "agent.tool_use":
+      case "agent.custom_tool_use": {
         const name = (ev as any).name || (ev as any).tool_use?.name;
         const input = (ev as any).input || (ev as any).tool_use?.input;
         if (name) appendToolCall(name, input);
         break;
       }
-      case "agent.tool_result": {
+      case "agent.tool_result":
+      case "user.custom_tool_result": {
         markLastToolDone();
         break;
       }

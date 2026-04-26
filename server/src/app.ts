@@ -1,6 +1,102 @@
 import express, { type Express } from "express";
 import cors from "cors";
 import { client, createSession } from "./anthropic.js";
+import { generateImage, slugifyForFilename } from "./nanobanana.js";
+import {
+  createPost,
+  updatePost,
+  listPosts,
+  getPost,
+  listCategories,
+  listTags,
+  listMedia,
+  uploadMedia,
+  type WpPostInput,
+} from "./wordpress.js";
+
+// ---- Custom tool dispatcher ---------------------------------------------
+// Quand l'agent émet `agent.custom_tool_use`, le pump appelle dispatchCustomTool
+// qui exécute le tool côté serveur et renvoie `user.custom_tool_result`.
+async function dispatchCustomTool(
+  sessionId: string,
+  ev: any,
+): Promise<void> {
+  const useId = ev.id;
+  const name = ev.name;
+  const input = (ev.input || {}) as Record<string, any>;
+  let resultText: string;
+  let isError = false;
+
+  try {
+    if (name === "wp_image_generate") {
+      const img = await generateImage({
+        prompt: input.prompt,
+        aspectRatio: input.aspect_ratio,
+        imageSize: input.image_size,
+      });
+      const ext = img.mimeType === "image/jpeg" ? "jpg" : "png";
+      const filename = `${slugifyForFilename(input.title || input.prompt) || "agent-image"}.${ext}`;
+      const media = await uploadMedia({
+        data: img.data,
+        filename,
+        mimeType: img.mimeType,
+        altText: input.alt_text || String(input.prompt).slice(0, 200),
+        title: input.title || filename.replace(/\.[^.]+$/, ""),
+      });
+      resultText = JSON.stringify({
+        id: media.id,
+        url: media.source_url,
+        alt_text: media.alt_text,
+        mime_type: media.mime_type,
+      });
+      console.log(`[custom-tool] wp_image_generate → media #${media.id}`);
+    } else if (name === "wp_publish") {
+      const action = input.action;
+      const { action: _a, id: postId, ...payload } = input;
+      // Status par défaut: publish (l'agent ne devrait pas appeler wp_publish
+      // sinon — pour les drafts l'agent émet un bloc wp-post)
+      const post: any = { status: "publish", ...payload };
+      let result: any;
+      if (action === "update") {
+        if (!postId) throw new Error("update requires id");
+        result = await updatePost(Number(postId), post);
+      } else {
+        result = await createPost(post);
+      }
+      resultText = JSON.stringify({
+        id: result.id,
+        link: result.link,
+        status: result.status,
+        deduped: result._deduped || false,
+      });
+      console.log(
+        `[custom-tool] wp_publish ${action} → #${result.id} ${result.link}`,
+      );
+    } else {
+      resultText = `unknown custom tool: ${name}`;
+      isError = true;
+    }
+  } catch (err: any) {
+    resultText = `Error executing ${name}: ${err?.message || err}`;
+    isError = true;
+    console.error(`[custom-tool] ${name} error:`, err);
+  }
+
+  try {
+    await client.beta.sessions.events.send(sessionId, {
+      events: [
+        {
+          type: "user.custom_tool_result",
+          custom_tool_use_id: useId,
+          is_error: isError,
+          content: [{ type: "text", text: resultText }],
+        } as any,
+      ],
+    });
+  } catch (err: any) {
+    console.error(`[custom-tool] failed to send result:`, err?.message);
+  }
+}
 
 // Buffer d'events par session pour permettre au client de replay tout ce qui
 // a été manqué pendant qu'il était hors ligne (téléphone en veille, perte de
@@ -43,6 +139,13 @@ async function startPump(sessionId: string): Promise<void> {
   state.pumpEnded = false;
   state.pumpError = undefined;
 
+  // Pendant le backfill on collecte les agent.custom_tool_use et on retire
+  // ceux qui ont déjà un user.custom_tool_result. À la fin, ce qui reste
+  // est dispatché (cas: server a crashé après avoir reçu use mais avant
+  // d'envoyer result). En live stream, dispatch immédiat.
+  let inBackfill = true;
+  const pendingDispatch = new Map<string, any>();
+
   const pushEvent = (ev: any) => {
     if (ev?.id && state.seenAnthropicIds.has(ev.id)) return;
     if (ev?.id) state.seenAnthropicIds.add(ev.id);
@@ -53,6 +156,17 @@ async function startPump(sessionId: string): Promise<void> {
       state.events.splice(0, state.events.length - MAX_BUFFERED_EVENTS);
     }
     for (const listener of state.listeners) listener(item);
+
+    if (ev?.type === "agent.custom_tool_use") {
+      if (inBackfill) {
+        pendingDispatch.set(ev.id, ev);
+      } else {
+        void dispatchCustomTool(sessionId, ev);
+      }
+    }
+    if (ev?.type === "user.custom_tool_result" && ev.custom_tool_use_id) {
+      pendingDispatch.delete(ev.custom_tool_use_id);
+    }
   };
 
   try {
@@ -68,11 +182,18 @@ async function startPump(sessionId: string): Promise<void> {
         pushEvent(ev);
       }
       console.log(
-        `[pump:${sessionId}] backfilled ${state.events.length} past events (${state.seenAnthropicIds.size} unique)`,
+        `[pump:${sessionId}] backfilled ${state.events.length} past events (${state.seenAnthropicIds.size} unique, ${pendingDispatch.size} unresolved tools)`,
       );
     } catch (err: any) {
       console.warn(`[pump:${sessionId}] backfill failed:`, err?.message);
     }
+
+    inBackfill = false;
+    // Dispatch des tools restés sans réponse (server crashé pendant exec)
+    for (const [, ev] of pendingDispatch) {
+      void dispatchCustomTool(sessionId, ev);
+    }
+    pendingDispatch.clear();
 
     // 2. Live stream
     const stream = await client.beta.sessions.events.stream(sessionId);
@@ -91,18 +212,6 @@ async function startPump(sessionId: string): Promise<void> {
     state.pumpEnded = true;
   }
 }
-import {
-  createPost,
-  updatePost,
-  listPosts,
-  getPost,
-  listCategories,
-  listTags,
-  listMedia,
-  uploadMedia,
-  type WpPostInput,
-} from "./wordpress.js";
-import { generateImage, slugifyForFilename } from "./nanobanana.js";
 
 export function createApp(): Express {
   const app = express();
