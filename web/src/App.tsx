@@ -928,88 +928,100 @@ function TodosBar({
   );
 }
 
-function ToolIcon({ name }: { name: string }) {
-  const icons: Record<string, string> = {
-    bash: "›_",
-    read: "📄",
-    write: "✎",
-    edit: "✎",
-    glob: "*",
-    grep: "⌕",
-    web_search: "⌕",
-    web_fetch: "↓",
-  };
-  return <span className="font-mono text-[10px] mr-0.5 opacity-70">{icons[name] || "•"}</span>;
+// Labels user-friendly pour chaque appel d'outil. On déduit du nom + input
+// une description compréhensible en français au lieu d'afficher 'web_fetch'
+// avec une URL brute.
+type FriendlyLabel = { icon: string; verb: string; detail?: string };
+
+function prettyPath(p?: string): string {
+  if (!p) return "";
+  if (p.startsWith("/mnt/memory/wp-editor-knowledge/")) {
+    return p.replace("/mnt/memory/wp-editor-knowledge/", "mémoire/");
+  }
+  const parts = p.split("/").filter(Boolean);
+  if (parts.length <= 2) return p;
+  return "…/" + parts.slice(-2).join("/");
+}
+
+function friendlyLabel(call: { name: string; input?: Record<string, any> }): FriendlyLabel {
+  const i = call.input || {};
+  const name = call.name;
+  switch (name) {
+    case "bash": {
+      const cmd = String(i.command || "").trim();
+      if (/^cat /.test(cmd)) {
+        return { icon: "📄", verb: "Lit", detail: prettyPath(cmd.replace(/^cat\s+/, "").split(/\s/)[0]) };
+      }
+      if (/^ls /.test(cmd)) {
+        return { icon: "📁", verb: "Liste", detail: prettyPath(cmd.replace(/^ls\s+(-\S+\s+)?/, "").split(/\s/)[0]) };
+      }
+      if (/^mkdir /.test(cmd)) {
+        return { icon: "📁", verb: "Crée dossier", detail: prettyPath(cmd.replace(/^mkdir\s+(-p\s+)?/, "").split(/\s/)[0]) };
+      }
+      if (/curl.*\/api\/image/.test(cmd)) {
+        const m = cmd.match(/"prompt":"([^"]+)"/);
+        return { icon: "🎨", verb: "Génère une image", detail: m?.[1] };
+      }
+      if (/^echo /.test(cmd)) {
+        const m = cmd.match(/echo\s+["']([^"']+)["']/);
+        return { icon: "✎", verb: "Écrit", detail: m?.[1] };
+      }
+      return { icon: "›_", verb: "Shell", detail: cmd };
+    }
+    case "read":
+      return { icon: "📄", verb: "Lit", detail: prettyPath(i.path || i.file_path) };
+    case "write":
+      return { icon: "✎", verb: "Écrit", detail: prettyPath(i.path || i.file_path) };
+    case "edit":
+      return { icon: "✎", verb: "Édite", detail: prettyPath(i.path || i.file_path) };
+    case "glob":
+      return { icon: "*", verb: "Cherche fichiers", detail: i.pattern };
+    case "grep":
+      return { icon: "⌕", verb: "Cherche dans code", detail: [i.pattern, i.path].filter(Boolean).join("  in  ") };
+    case "web_search":
+      return { icon: "🔎", verb: "Recherche web", detail: i.query };
+    case "web_fetch": {
+      const url = String(i.url || "");
+      if (url.includes("/api/wp/posts/")) {
+        const m = url.match(/\/api\/wp\/posts\/(\d+)/);
+        return { icon: "📋", verb: "Lit l'article WP", detail: m ? `#${m[1]}` : "" };
+      }
+      if (url.includes("/api/wp/posts")) {
+        const search = url.match(/[?&]search=([^&]+)/)?.[1];
+        if (search)
+          return { icon: "🔍", verb: "Cherche articles WP", detail: decodeURIComponent(search.replace(/\+/g, " ")) };
+        return { icon: "📋", verb: "Liste articles WP" };
+      }
+      if (url.includes("/api/wp/categories")) return { icon: "🏷", verb: "Liste catégories WP" };
+      if (url.includes("/api/wp/tags")) return { icon: "🏷", verb: "Liste tags WP" };
+      if (url.includes("/api/wp/media")) return { icon: "🖼", verb: "Liste médias WP" };
+      let host = url;
+      try {
+        host = new URL(url).hostname;
+      } catch {}
+      return { icon: "↓", verb: "Fetch", detail: host };
+    }
+    case "wp_image_generate":
+      return { icon: "🎨", verb: "Génère une image", detail: i.prompt };
+    case "wp_publish":
+      return {
+        icon: "🚀",
+        verb: i.action === "update" ? "Met à jour l'article WP" : "Publie l'article WP",
+        detail: i.title,
+      };
+    default:
+      return { icon: "🔧", verb: name };
+  }
 }
 
 function toolIconChar(name: string): string {
-  return (
-    {
-      bash: "›_",
-      read: "📄",
-      write: "✎",
-      edit: "✎",
-      glob: "*",
-      grep: "⌕",
-      web_search: "⌕",
-      web_fetch: "↓",
-    } as Record<string, string>
-  )[name] || "🔧";
+  return friendlyLabel({ name }).icon;
 }
 
 function summarizeToolForLine(call: { name: string; input?: Record<string, any> }): string {
-  const i = call.input || {};
-  const raw = (() => {
-    switch (call.name) {
-      case "bash":
-        return i.command || "";
-      case "web_fetch":
-        return i.url || "";
-      case "web_search":
-        return i.query || "";
-      case "read":
-      case "write":
-      case "edit":
-        return i.path || i.file_path || "";
-      case "glob":
-      case "grep":
-        return i.pattern || "";
-      default: {
-        const v = Object.values(i).find(
-          (x) => typeof x === "string" || typeof x === "number",
-        );
-        return v ? String(v) : "";
-      }
-    }
-  })();
-  // Tronque agressivement pour la ligne unique
-  return raw.replace(/\s+/g, " ").slice(0, 90);
-}
-
-function summarizeTool(call: { name: string; input?: Record<string, any> }): string {
-  const i = call.input || {};
-  switch (call.name) {
-    case "bash":
-      return i.command || "";
-    case "web_fetch":
-      return i.url || "";
-    case "web_search":
-      return i.query || "";
-    case "read":
-    case "write":
-    case "edit":
-      return i.path || i.file_path || "";
-    case "glob":
-      return i.pattern || "";
-    case "grep":
-      return [i.pattern, i.path].filter(Boolean).join("  in  ");
-    default:
-      // Generic: take first scalar value
-      const val = Object.values(i).find(
-        (v) => typeof v === "string" || typeof v === "number",
-      );
-      return val ? String(val) : "";
-  }
+  const f = friendlyLabel(call);
+  const text = f.detail ? `${f.verb} · ${f.detail}` : f.verb;
+  return text.replace(/\s+/g, " ").slice(0, 110);
 }
 
 function ToolCallRow({
@@ -1018,31 +1030,31 @@ function ToolCallRow({
   call: { name: string; status: "running" | "done"; input?: Record<string, any> };
 }) {
   const [open, setOpen] = useState(false);
-  const summary = summarizeTool(call);
+  const label = friendlyLabel(call);
   const hasInput = call.input && Object.keys(call.input).length > 0;
   return (
     <div className="text-xs">
       <button
         type="button"
         onClick={() => hasInput && setOpen((o) => !o)}
-        className={`flex items-start gap-2 w-full text-left px-2 py-1 rounded-md border transition-colors ${
+        className={`flex items-center gap-2 w-full text-left px-2 py-1.5 rounded-md border transition-colors ${
           call.status === "running"
             ? "border-amber-500/30 bg-amber-500/5"
             : "border-border bg-bg-tertiary/40 hover:bg-bg-tertiary"
         }`}
       >
-        <span className="flex items-center gap-1 flex-shrink-0">
-          <ToolIcon name={call.name} />
-          <span className="font-mono text-text-secondary">{call.name}</span>
+        <span className="flex items-center gap-1.5 flex-shrink-0">
+          <span className="text-base leading-none">{label.icon}</span>
+          <span className="text-text-primary font-medium">{label.verb}</span>
           {call.status === "running" ? (
             <span className="text-amber-400 animate-pulse">…</span>
           ) : (
             <span className="text-emerald-500">✓</span>
           )}
         </span>
-        {summary && (
-          <span className="font-mono text-text-tertiary truncate flex-1 min-w-0">
-            {summary}
+        {label.detail && (
+          <span className="text-text-tertiary truncate flex-1 min-w-0 italic">
+            {label.detail}
           </span>
         )}
         {hasInput && (
@@ -1050,9 +1062,12 @@ function ToolCallRow({
         )}
       </button>
       {open && hasInput && (
-        <pre className="mt-1 ml-4 p-2 rounded-md bg-bg-primary border border-border text-[11px] text-text-secondary font-mono whitespace-pre-wrap break-all max-h-60 overflow-auto">
-          {JSON.stringify(call.input, null, 2)}
-        </pre>
+        <div className="mt-1 ml-4 p-2 rounded-md bg-bg-primary border border-border text-[11px]">
+          <div className="text-text-muted font-mono mb-1">{call.name}</div>
+          <pre className="text-text-secondary font-mono whitespace-pre-wrap break-all max-h-60 overflow-auto">
+            {JSON.stringify(call.input, null, 2)}
+          </pre>
+        </div>
       )}
     </div>
   );
