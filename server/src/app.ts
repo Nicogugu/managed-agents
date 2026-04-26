@@ -85,6 +85,13 @@ export function createApp(): Express {
       closed = true;
     });
 
+    // Heartbeat toutes les 15s pour empêcher les proxies (Traefik, etc.)
+    // de couper la connexion idle.
+    const heartbeat = setInterval(() => {
+      if (closed) return;
+      res.write(": ping\n\n");
+    }, 15000);
+
     try {
       const stream = await client.beta.sessions.events.stream(id);
       for await (const event of stream as any) {
@@ -95,6 +102,7 @@ export function createApp(): Express {
       console.error("[stream] error:", err);
       if (!closed) send({ type: "error", message: err.message });
     } finally {
+      clearInterval(heartbeat);
       if (!closed) res.end();
     }
   });

@@ -32,9 +32,17 @@ export function useSession() {
         const es = new EventSource(`/api/sessions/${id}/stream`);
         esRef.current = es;
 
-        es.onopen = () => setStatus("idle");
+        es.onopen = () => {
+          setStatus("idle");
+          setError(null);
+        };
         es.onerror = () => {
-          setError("Connexion au stream perdue");
+          // EventSource reconnecte automatiquement après chaque fin de turn agent
+          // (res.end côté serveur). On n'affiche l'erreur que si la connexion est
+          // vraiment fermée (readyState === CLOSED).
+          if (es.readyState === EventSource.CLOSED) {
+            setError("Connexion au stream perdue");
+          }
         };
 
         es.onmessage = (ev) => {
