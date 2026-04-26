@@ -142,6 +142,16 @@ export function createApp(): Express {
     }
   });
 
+  app.get("/api/sessions/:id", async (req, res) => {
+    try {
+      const session = await client.beta.sessions.retrieve(req.params.id);
+      res.json({ id: session.id, title: (session as any).title });
+    } catch (err: any) {
+      const status = err?.status || 404;
+      res.status(status).json({ error: err?.message || "session not found" });
+    }
+  });
+
   app.post("/api/sessions/:id/message", async (req, res) => {
     try {
       const { id } = req.params;
@@ -182,9 +192,13 @@ export function createApp(): Express {
       closed = true;
     });
 
-    const writeEvent = (id: number, data: unknown) => {
+    const writeEvent = (id: number, data: unknown, replayed = false) => {
       if (closed) return;
-      res.write(`id: ${id}\ndata: ${JSON.stringify(data)}\n\n`);
+      // _replayed: true sur les events qui sortent du buffer (passé) — le client
+      // les insère directement sans typewriter, sinon revivre 50 events serait
+      // douloureusement long.
+      const enriched = replayed ? { ...(data as object), _replayed: true } : data;
+      res.write(`id: ${id}\ndata: ${JSON.stringify(enriched)}\n\n`);
     };
 
     // Heartbeat toutes les 15s pour empêcher les proxies (Traefik, etc.)
@@ -205,10 +219,10 @@ export function createApp(): Express {
 
     const state = getStreamState(id);
 
-    // 1. Replay des events manqués depuis Last-Event-ID
+    // 1. Replay des events manqués depuis Last-Event-ID (marqués _replayed)
     for (const ev of state.events) {
       if (ev.id > lastEventId) {
-        writeEvent(ev.id, ev.data);
+        writeEvent(ev.id, ev.data, true);
       }
     }
 

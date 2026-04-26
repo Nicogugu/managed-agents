@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "./types";
-import { createSession } from "./api";
+import { createSession, sessionExists } from "./api";
+
+const SESSION_STORAGE_KEY = "wp-editor.sessionId";
 
 type ServerEvent =
   | { type: "agent.message"; content: Array<{ type: "text"; text: string }> }
@@ -77,7 +79,24 @@ export function useSession() {
     let cancelled = false;
     (async () => {
       try {
-        const id = await createSession();
+        // Réutilise la session précédente (localStorage) si elle existe encore
+        // côté Anthropic — le serveur garde tout l'historique des events.
+        // Sinon on en crée une nouvelle. Ça évite de "repartir à zéro" à
+        // chaque reload / reconnexion mobile.
+        let id: string | null = null;
+        const stored =
+          typeof localStorage !== "undefined"
+            ? localStorage.getItem(SESSION_STORAGE_KEY)
+            : null;
+        if (stored && (await sessionExists(stored))) {
+          id = stored;
+        }
+        if (!id) {
+          id = await createSession();
+          if (typeof localStorage !== "undefined") {
+            localStorage.setItem(SESSION_STORAGE_KEY, id);
+          }
+        }
         if (cancelled) return;
         setSessionId(id);
         sessionIdRef.current = id;
@@ -136,9 +155,14 @@ export function useSession() {
           .map((b: any) => b.text)
           .join("");
         if (!text) break;
-        // L'API Managed Agents v2 ne stream pas les tokens (text arrive en bloc).
-        // On simule un streaming rapide côté client pour rendre l'arrivée visible.
-        enqueueTypewriterReveal(text);
+        // Pour les events replayés (historique d'une session reprise), on insère
+        // direct — typewriter ne sert à rien et serait extrêmement lent. Pour
+        // les events live, typewriter pour simuler le streaming.
+        if ((ev as any)._replayed) {
+          appendAssistantText(text);
+        } else {
+          enqueueTypewriterReveal(text);
+        }
         break;
       }
       case "agent.tool_use": {
@@ -257,6 +281,29 @@ export function useSession() {
     );
   }
 
+  async function newSession() {
+    esRef.current?.close();
+    typewriterQueue.current = [];
+    typewriterRunning.current = false;
+    pendingIdle.current = false;
+    lastEventIdRef.current = 0;
+    currentAssistantId.current = null;
+    setMessages([]);
+    setError(null);
+    setStatus("connecting");
+    try {
+      const id = await createSession();
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(SESSION_STORAGE_KEY, id);
+      }
+      setSessionId(id);
+      sessionIdRef.current = id;
+      connect(id);
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+
   function appendUserMessage(text: string) {
     const id = `u_${Date.now()}`;
     setMessages((prev) => [...prev, { id, role: "user", text }]);
@@ -269,5 +316,6 @@ export function useSession() {
     status,
     error,
     appendUserMessage,
+    newSession,
   };
 }

@@ -16,7 +16,7 @@ import type { ChatMessage, Mode, TodoItem, WpAsk, WpDraft, WpPlan } from "./type
 type Health = { ok: boolean; anthropicKey: boolean; wpConfigured: boolean };
 
 export function App() {
-  const { sessionId, messages, status, error, appendUserMessage } = useSession();
+  const { sessionId, messages, status, error, appendUserMessage, newSession } = useSession();
   const [input, setInput] = useState("");
   const [todosOpen, setTodosOpen] = useState(false);
   const [textInputOpen, setTextInputOpen] = useState(false);
@@ -179,6 +179,16 @@ export function App() {
         health={health}
         mode={mode}
         onModeChange={setMode}
+        onNewSession={() => {
+          if (
+            messages.length === 0 ||
+            window.confirm("Démarrer une nouvelle session ? L'historique reste dans Anthropic mais l'interface part à zéro.")
+          ) {
+            setAskAnswered({});
+            handledDrafts.current = new Set();
+            void newSession();
+          }
+        }}
       />
 
       {(todos.length > 0 || currentPhase) && (
@@ -316,12 +326,14 @@ function Header({
   health,
   mode,
   onModeChange,
+  onNewSession,
 }: {
   sessionId: string | null;
   status: "idle" | "running" | "connecting";
   health: Health | null;
   mode: Mode;
   onModeChange: (m: Mode) => void;
+  onNewSession: () => void;
 }) {
   return (
     <header className="border-b border-border bg-bg-primary/80 backdrop-blur-md sticky top-0 z-10">
@@ -341,8 +353,17 @@ function Header({
         <ModeToggle mode={mode} onChange={onModeChange} />
       </div>
       {sessionId && (
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 pb-2 text-xs text-text-muted font-mono truncate">
-          {sessionId}
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 pb-2 flex items-center justify-between gap-2">
+          <span className="text-xs text-text-muted font-mono truncate">
+            {sessionId}
+          </span>
+          <button
+            type="button"
+            onClick={onNewSession}
+            className="text-xs text-text-muted hover:text-text-secondary underline flex-shrink-0"
+          >
+            ＋ nouvelle session
+          </button>
         </div>
       )}
     </header>

@@ -23,6 +23,16 @@ export async function createSession(title = "Chat session"): Promise<string> {
   return data.id as string;
 }
 
+// Vérifie qu'une session Anthropic existe encore (pour réutilisation localStorage)
+export async function sessionExists(id: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sessions/${id}`);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function fetchHealth(): Promise<{
   ok: boolean;
   anthropicKey: boolean;
