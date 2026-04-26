@@ -9,10 +9,14 @@ import { client, createSession } from "./anthropic.js";
 type BufferedEvent = { id: number; data: unknown };
 type StreamState = {
   events: BufferedEvent[];
+  // Dédup par event id Anthropic, persiste entre les redémarrages du pump
+  // (important quand le stream Anthropic se ferme pour cause d'inactivité et
+  // qu'on doit le rouvrir sur la prochaine reconnexion client).
+  seenAnthropicIds: Set<string>;
   pumpStarted: boolean;
   pumpEnded: boolean;
   pumpError?: string;
-  listeners: Set<(ev: BufferedEvent | { id: -1; eof: string }) => void>;
+  listeners: Set<(ev: BufferedEvent) => void>;
 };
 const sessionStreams = new Map<string, StreamState>();
 const MAX_BUFFERED_EVENTS = 5000;
@@ -22,6 +26,7 @@ function getStreamState(sessionId: string): StreamState {
   if (!s) {
     s = {
       events: [],
+      seenAnthropicIds: new Set(),
       pumpStarted: false,
       pumpEnded: false,
       listeners: new Set(),
@@ -35,13 +40,12 @@ async function startPump(sessionId: string): Promise<void> {
   const state = getStreamState(sessionId);
   if (state.pumpStarted) return;
   state.pumpStarted = true;
+  state.pumpEnded = false;
+  state.pumpError = undefined;
 
-  // Dédup par event id Anthropic pour absorber les recouvrements entre
-  // events.list (backfill) et events.stream (live).
-  const seenAnthropicIds = new Set<string>();
   const pushEvent = (ev: any) => {
-    if (ev?.id && seenAnthropicIds.has(ev.id)) return;
-    if (ev?.id) seenAnthropicIds.add(ev.id);
+    if (ev?.id && state.seenAnthropicIds.has(ev.id)) return;
+    if (ev?.id) state.seenAnthropicIds.add(ev.id);
     const seq = state.events.length + 1;
     const item: BufferedEvent = { id: seq, data: ev };
     state.events.push(item);
@@ -52,8 +56,10 @@ async function startPump(sessionId: string): Promise<void> {
   };
 
   try {
-    // 1. Backfill: replay l'historique complet de la session (utile après
-    //    redéploiement du server: events.stream ne renvoie pas le passé).
+    // 1. Backfill: replay l'historique complet de la session. Indispensable
+    //    après redéploiement du server (events.stream ne renvoie pas le passé)
+    //    et après que l'utilisateur a envoyé des messages pendant que la
+    //    connexion SSE n'avait pas de pump actif.
     try {
       for await (const ev of (client.beta as any).sessions.events.list(
         sessionId,
@@ -62,7 +68,7 @@ async function startPump(sessionId: string): Promise<void> {
         pushEvent(ev);
       }
       console.log(
-        `[pump:${sessionId}] backfilled ${state.events.length} past events`,
+        `[pump:${sessionId}] backfilled ${state.events.length} past events (${state.seenAnthropicIds.size} unique)`,
       );
     } catch (err: any) {
       console.warn(`[pump:${sessionId}] backfill failed:`, err?.message);
@@ -77,11 +83,12 @@ async function startPump(sessionId: string): Promise<void> {
     console.error(`[pump:${sessionId}] error:`, err?.message);
     state.pumpError = err?.message || "stream pump error";
   } finally {
+    // Pump terminé : Anthropic a fermé le stream ou erreur. On le marque
+    // comme terminé MAIS on garde la possibilité de le relancer sur la
+    // prochaine reconnexion SSE (le seenAnthropicIds persiste, donc pas de
+    // doublons au redémarrage).
+    state.pumpStarted = false;
     state.pumpEnded = true;
-    const reason = state.pumpError || "ended";
-    for (const listener of state.listeners) {
-      listener({ id: -1, eof: reason });
-    }
   }
 }
 import {
@@ -205,22 +212,9 @@ export function createApp(): Express {
       }
     }
 
-    // 2. Si le pump est déjà fini (session terminée Anthropic), close.
-    if (state.pumpEnded) {
-      clearInterval(heartbeat);
-      if (!closed) res.end();
-      return;
-    }
-
-    // 3. Tail le stream live: on s'inscrit comme listener
-    const listener = (ev: BufferedEvent | { id: -1; eof: string }) => {
+    // 2. Tail le stream live: on s'inscrit comme listener
+    const listener = (ev: BufferedEvent) => {
       if (closed) return;
-      if ("eof" in ev) {
-        // Stream Anthropic terminé
-        clearInterval(heartbeat);
-        res.end();
-        return;
-      }
       writeEvent(ev.id, ev.data);
     };
     state.listeners.add(listener);
@@ -230,7 +224,11 @@ export function createApp(): Express {
       clearInterval(heartbeat);
     });
 
-    // 4. Si le pump n'a jamais démarré, le lancer (fire-and-forget)
+    // 3. Démarre le pump si pas en cours. On le redémarre aussi si pumpEnded
+    //    (le stream Anthropic peut se terminer pour cause d'inactivité; chaque
+    //    nouvelle connexion client doit pouvoir relancer le pump pour récupérer
+    //    les events que l'utilisateur a posté pendant l'absence). seenAnthropicIds
+    //    persiste, donc pas de doublons.
     if (!state.pumpStarted) {
       void startPump(id);
     }
