@@ -39,12 +39,11 @@ services:
       - traefik.http.routers.agent-server.tls.certresolver=letsencrypt
       - traefik.http.routers.agent-server.service=agent-server
       - traefik.http.routers.agent-server.priority=100
-      - traefik.http.routers.agent-server.middlewares=editor-auth
-      # Basic Auth: EDITOR_AUTH_USERS = "user:bcryptHash" (génère via
-      # htpasswd -nbB user password | sed -e 's/\$/\$\$/g'). Échappe les $
-      # car docker compose les interprète.
-      - traefik.http.middlewares.editor-auth.basicauth.users=${EDITOR_AUTH_USERS}
-      - traefik.http.middlewares.editor-auth.basicauth.realm=WP Editor
+      # Basic Auth temporairement désactivé pour isoler un panic Traefik
+      # sur le middleware. À réactiver quand le bug sera identifié.
+      # - traefik.http.routers.agent-server.middlewares=editor-auth
+      # - traefik.http.middlewares.editor-auth.basicauth.users=${EDITOR_AUTH_USERS}
+      # - traefik.http.middlewares.editor-auth.basicauth.realm=WP Editor
 
   web:
     build:
@@ -65,4 +64,4 @@ services:
       - traefik.http.routers.agent-web.tls.certresolver=letsencrypt
       - traefik.http.routers.agent-web.service=agent-web
       - traefik.http.routers.agent-web.priority=10
-      - traefik.http.routers.agent-web.middlewares=editor-auth@docker
+      # - traefik.http.routers.agent-web.middlewares=editor-auth@docker
