@@ -1,0 +1,52 @@
+name: cms-lab-agent
+
+# Cohabite avec le Traefik Hostinger (network_mode: host, /docker/traefik/).
+# Routing single-domain: agent.${VPS_IP}.nip.io
+#   /api/*  -> server (Express)
+#   /*      -> web (nginx + React)
+
+networks:
+  default:
+    name: cms-lab-agent_default
+
+services:
+  server:
+    image: ghcr.io/nicogugu/managed-agents-server:latest
+    pull_policy: always
+    restart: unless-stopped
+    expose:
+      - "3001"
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      WP_BASE_URL: ${WP_BASE_URL}
+      WP_USER: ${WP_USER}
+      WP_APP_PASSWORD: ${WP_APP_PASSWORD}
+      PORT: "3001"
+      NODE_ENV: production
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=cms-lab-agent_default
+      - traefik.http.services.agent-server.loadbalancer.server.port=3001
+      - traefik.http.routers.agent-server.rule=Host(`agent.${VPS_IP}.nip.io`) && PathPrefix(`/api`)
+      - traefik.http.routers.agent-server.entrypoints=websecure
+      - traefik.http.routers.agent-server.tls=true
+      - traefik.http.routers.agent-server.tls.certresolver=letsencrypt
+      - traefik.http.routers.agent-server.service=agent-server
+      - traefik.http.routers.agent-server.priority=100
+
+  web:
+    image: ghcr.io/nicogugu/managed-agents-web:latest
+    pull_policy: always
+    restart: unless-stopped
+    expose:
+      - "80"
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=cms-lab-agent_default
+      - traefik.http.services.agent-web.loadbalancer.server.port=80
+      - traefik.http.routers.agent-web.rule=Host(`agent.${VPS_IP}.nip.io`)
+      - traefik.http.routers.agent-web.entrypoints=websecure
+      - traefik.http.routers.agent-web.tls=true
+      - traefik.http.routers.agent-web.tls.certresolver=letsencrypt
+      - traefik.http.routers.agent-web.service=agent-web
+      - traefik.http.routers.agent-web.priority=10
