@@ -28,26 +28,35 @@ export function App() {
     }
     return [];
   }, [messages]);
-  // Activité courante de l'agent (ce qu'il fait MAINTENANT) — pour la live status line
+  // Activité courante de l'agent — affiche en streaming ce qu'il fait
   const activity = useMemo(() => {
     if (status === "idle") return null;
     if (status === "connecting") return { icon: "⏳", text: "Connexion au stream…" };
 
-    // Cherche le dernier outil running dans le dernier message assistant
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
       if (m.role !== "assistant") continue;
+      // 1. Outil en cours : affiche son nom + argument principal
       const running = [...m.toolCalls].reverse().find((t) => t.status === "running");
       if (running) {
+        const summary = summarizeToolForLine(running);
         return {
           icon: toolIconChar(running.name),
-          text: `${running.name}${summarizeToolForLine(running) ? " · " + summarizeToolForLine(running) : ""}`,
+          text: summary ? `${running.name} · ${summary}` : `${running.name}…`,
           mono: true,
         };
       }
-      // Si tous les outils sont done mais l'agent stream du texte → "rédaction"
-      if (m.toolCalls.length > 0 && m.text) {
-        return { icon: "✍", text: "Rédaction…" };
+      // 2. Texte qui stream : affiche les derniers caractères tapés
+      if (m.text) {
+        // Garde le tail du texte brut, sans les blocs JSON (ils explosent en visuel)
+        const visible = m.text
+          .replace(/```[\s\S]*?```/g, "")
+          .replace(/[\s ]+/g, " ")
+          .trim();
+        const tail = visible.slice(-110).trim();
+        if (tail) {
+          return { icon: "✍", text: "… " + tail };
+        }
       }
       break;
     }
@@ -198,11 +207,21 @@ export function App() {
       {activity && (
         <div className="border-t border-border bg-bg-elevated px-4 sm:px-6 py-2 flex items-center gap-2 text-sm text-text-secondary">
           <span className="animate-pulse flex-shrink-0">{activity.icon}</span>
-          <span
-            className={`truncate min-w-0 ${activity.mono ? "font-mono text-xs" : ""}`}
+          {/* dir="rtl" sur le container fait dépasser à GAUCHE quand le contenu
+              est trop long, donc les derniers caractères (le tail streaming)
+              restent visibles à droite. Le span enfant en dir="ltr" garde la
+              lecture du français normale. */}
+          <div
+            className="flex-1 min-w-0 overflow-hidden whitespace-nowrap"
+            dir="rtl"
           >
-            {activity.text}
-          </span>
+            <span
+              dir="ltr"
+              className={activity.mono ? "font-mono text-xs" : ""}
+            >
+              {activity.text}
+            </span>
+          </div>
         </div>
       )}
 
