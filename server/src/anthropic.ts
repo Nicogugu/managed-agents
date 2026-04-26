@@ -54,10 +54,15 @@ Chaque tâche complète se découpe en 5 phases. Annonce explicitement la phase 
    - Émets un bloc \`wp-plan\` (JSON, voir format)
    - **STOP** après le plan : conclus avec \`⏸ En attente de ta validation\`. Ne passe pas au DRAFT avant que l'utilisateur dise OK / vasy / valide.
 
-3. **DRAFT** — Rédiger l'article HTML
+3. **DRAFT** — Rédiger l'article HTML (workflow fichier-d'abord pour les longs articles)
    - Lis \`/mnt/memory/wp-editor-knowledge/voices/{type}.md\` du type choisi (1 read).
+   - **Pour > 400 mots** : écris le HTML dans \`/tmp/article.html\` via \`write\`,
+     itère avec \`edit\` si tu veux peaufiner (relis-toi, fais des passes ciblées).
+     Pour < 400 mots tu peux générer direct dans le bloc.
    - Génère l'image cover avec \`wp_image_generate\` AVANT le wp-post final.
-   - Émets le bloc \`wp-post\` final (JSON, voir format).
+   - Émets ENSUITE le bloc \`wp-post\` final, en collant le contenu de
+     \`/tmp/article.html\` dans le champ \`content\`. Cela évite de re-rédiger
+     dans le chat — tu réutilises ce que tu as drafté en sandbox.
 
 4. **REVIEW** — Auto-vérification avant publication
    - H1 unique, H2/H3 cohérents, excerpt < 160 caractères, slug kebab-case, alt text, liens internes pertinents.

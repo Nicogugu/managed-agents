@@ -24,6 +24,11 @@ import {
 
 type Health = { ok: boolean; anthropicKey: boolean; wpConfigured: boolean };
 
+type PublishState =
+  | { status: "pending" }
+  | { status: "published"; id: number; link: string }
+  | { status: "error"; error: string };
+
 export function App() {
   const { sessionId, messages, status, error, appendUserMessage, newSession } = useSession();
   const [input, setInput] = useState("");
@@ -105,10 +110,11 @@ export function App() {
   const [pendingDraft, setPendingDraft] = useState<WpDraft | null>(null);
   // Toast peut être un texte simple ou un objet avec un lien cliquable
   const [toast, setToast] = useState<{ text: string; link?: string } | null>(null);
-  // Map "messageId#draftIdx" → { id, link } pour afficher le lien cliquable
-  // dans la DraftCard une fois l'article publié.
+  // Map "messageId#draftIdx" → état de publication. Permet d'afficher un
+  // status pending/published/error EN CONTINU sur la DraftCard, sans
+  // 'blanc' silencieux si la publi échoue ou prend du temps.
   const [publishedDrafts, setPublishedDrafts] = useState<
-    Record<string, { id: number; link: string }>
+    Record<string, PublishState>
   >({});
   const [health, setHealth] = useState<Health | null>(null);
   const handledDrafts = useRef<Set<string>>(new Set());
@@ -130,11 +136,13 @@ export function App() {
         if (handledDrafts.current.has(key)) continue;
         handledDrafts.current.add(key);
         const isUpdate = drafts[i].action === "update";
+        // Marque pending tout de suite pour que la DraftCard montre l'état
+        setPublishedDrafts((prev) => ({ ...prev, [key]: { status: "pending" } }));
         publishDraft({ ...drafts[i], status: "publish" })
           .then((post: any) => {
             setPublishedDrafts((prev) => ({
               ...prev,
-              [key]: { id: post.id, link: post.link },
+              [key]: { status: "published", id: post.id, link: post.link },
             }));
             setToast({
               text: `${isUpdate ? "Mis à jour" : "Publié"} · ${
@@ -143,7 +151,13 @@ export function App() {
               link: post.link,
             });
           })
-          .catch((err) => setToast({ text: `Erreur · ${err.message}` }));
+          .catch((err) => {
+            setPublishedDrafts((prev) => ({
+              ...prev,
+              [key]: { status: "error", error: err.message },
+            }));
+            setToast({ text: `Erreur · ${err.message}` });
+          });
       }
     }
   }, [messages, mode]);
@@ -348,7 +362,11 @@ export function App() {
                 ) {
                   setPublishedDrafts((prev) => ({
                     ...prev,
-                    [`${m.id}#${di}`]: { id: post.id, link: post.link },
+                    [`${m.id}#${di}`]: {
+                      status: "published",
+                      id: post.id,
+                      link: post.link,
+                    },
                   }));
                   return;
                 }
@@ -604,7 +622,7 @@ function MessageBubble({
   onPublish: (draft: WpDraft) => void;
   onAnswerAsk: (askIdx: number, label: string, value: string) => void;
   askAnsweredFor: (askIdx: number) => string | undefined;
-  publishedFor: (draftIdx: number) => { id: number; link: string } | undefined;
+  publishedFor: (draftIdx: number) => PublishState | undefined;
   onApprovePlan: () => void;
   disabled: boolean;
 }) {
@@ -1082,12 +1100,14 @@ function DraftCard({
   draft: WpDraft;
   mode: Mode;
   onPublish: () => void;
-  published?: { id: number; link: string };
+  published?: PublishState;
 }) {
-  // Quand l'article est publié et qu'on a un lien, le titre devient un lien
-  // cliquable target=_blank vers l'article live.
+  const isPublished = published?.status === "published";
+  const isPending = published?.status === "pending";
+  const isError = published?.status === "error";
+
   const titleEl =
-    published?.link ? (
+    isPublished && published.status === "published" ? (
       <a
         href={published.link}
         target="_blank"
@@ -1109,17 +1129,28 @@ function DraftCard({
     <div className="surface rounded-xl p-3 sm:p-4 border-accent/20 bg-accent-subtle">
       <div className="flex items-start justify-between gap-3 mb-2">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className="pill pill-running !text-accent !bg-accent-subtle !border-accent/40 uppercase tracking-wide">
               {draft.action === "create" ? "nouveau" : `update #${draft.id}`}
             </span>
-            {published ? (
+            {isPending && (
+              <span className="pill !text-amber-300 !border-amber-500/40 !bg-amber-500/10 uppercase tracking-wide">
+                <span className="animate-pulse">📤</span> publication…
+              </span>
+            )}
+            {isPublished && published.status === "published" && (
               <span className="pill !text-emerald-400 !border-emerald-500/40 !bg-emerald-500/10 uppercase tracking-wide">
                 ✓ publié #{published.id}
               </span>
-            ) : draft.status ? (
+            )}
+            {isError && (
+              <span className="pill !text-red-400 !border-red-500/40 !bg-red-500/10 uppercase tracking-wide">
+                ⚠ erreur
+              </span>
+            )}
+            {!published && draft.status && (
               <span className="pill text-text-tertiary uppercase tracking-wide">{draft.status}</span>
-            ) : null}
+            )}
           </div>
           {titleEl}
           {draft.excerpt && (
@@ -1127,7 +1158,7 @@ function DraftCard({
               {draft.excerpt}
             </div>
           )}
-          {published?.link && (
+          {isPublished && published.status === "published" && (
             <a
               href={published.link}
               target="_blank"
@@ -1137,6 +1168,9 @@ function DraftCard({
               {published.link}
             </a>
           )}
+          {isError && published.status === "error" && (
+            <div className="text-xs text-red-400 mt-2">{published.error}</div>
+          )}
         </div>
         {!published && mode === "validate" && (
           <button onClick={onPublish} className="btn-primary flex-shrink-0">
@@ -1145,6 +1179,11 @@ function DraftCard({
         )}
         {!published && mode === "auto" && (
           <span className="text-xs text-text-tertiary self-center flex-shrink-0">auto…</span>
+        )}
+        {isError && (
+          <button onClick={onPublish} className="btn-secondary flex-shrink-0 text-xs">
+            Réessayer
+          </button>
         )}
       </div>
       <details className="mt-2">
