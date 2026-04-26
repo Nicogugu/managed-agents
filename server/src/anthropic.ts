@@ -706,7 +706,7 @@ export async function createSession(title: string) {
   ]);
 
   const agentRef: any = cachedAgentVersion
-    ? { id: agentId, version: cachedAgentVersion }
+    ? { id: agentId, type: "agent", version: cachedAgentVersion }
     : agentId;
 
   const session = await client.beta.sessions.create({
