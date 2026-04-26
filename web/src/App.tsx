@@ -31,7 +31,8 @@ export function App() {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
       if (m.role !== "assistant") continue;
-      const match = m.text.match(/Phase\s*:\s*(DISCOVER|PLAN|DRAFT|REVIEW|PUBLISH)/i);
+      // Tolère le markdown bold autour du nom de phase: "Phase: **PLAN**" ou "Phase: PLAN"
+      const match = m.text.match(/Phase\s*:?\s*\*{0,2}\s*(DISCOVER|PLAN|DRAFT|REVIEW|PUBLISH)\s*\*{0,2}/i);
       if (match) return match[1].toUpperCase();
     }
     return null;
