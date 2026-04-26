@@ -304,8 +304,15 @@ Affichée dans la `TodosBar` collapsible en haut, avec phase courante (DISCOVER/
 
 ---
 
-## Sécurité
+## Sécurité & limites de coût
 
+- **Auth Basic via Traefik** : toute l'app (web + API) est gated derrière une auth HTTP Basic. Génère ton hash via `htpasswd -nbB user motDePasse | sed -e 's/\$/\$\$/g'` et passe en secret GitHub `EDITOR_AUTH_USERS` (format `user:bcryptHash`). Le browser ouvre une popup de login au premier accès.
+- **Rate limits par IP** (express-rate-limit) :
+  - 20 sessions/h max (créations Anthropic = $$)
+  - 30 messages/min max (par session)
+  - 10 écritures WP/min max (publish + image gen)
+- **Cap de coût journalier** (optionnel) via `DAILY_COST_USD_CAP` env var. L'app refuse les nouvelles sessions et messages si dépassé. Lecture (GET) reste autorisée.
+- **GET `/api/admin/stats`** : agrégat journalier (tokens input/output, cache, images, coût estimé en USD). Optionnellement protégé par header `X-Admin-Token` si `ADMIN_TOKEN` est set.
 - `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `WP_USER`, `WP_APP_PASSWORD` ne quittent **jamais** le serveur.
 - L'agent ne reçoit **jamais** les credentials WP : c'est le backend qui authentifie auprès de WP via Application Password en Basic Auth.
 - En mode auto-publish, l'agent peut faire publier sans validation utilisateur — utiliser avec discernement.

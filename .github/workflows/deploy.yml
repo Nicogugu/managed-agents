@@ -42,6 +42,7 @@ jobs:
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           VPS_IP: ${{ secrets.VPS_IP }}
+          EDITOR_AUTH_USERS: ${{ secrets.EDITOR_AUTH_USERS }}
         run: |
           ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 \
             "$VPS_USER@$VPS_HOST" \
@@ -51,6 +52,7 @@ jobs:
             WP_APP_PASSWORD="$WP_APP_PASSWORD" \
             GEMINI_API_KEY="$GEMINI_API_KEY" \
             VPS_IP="$VPS_IP" \
+            EDITOR_AUTH_USERS="$EDITOR_AUTH_USERS" \
             BRANCH="$BRANCH" \
             bash -se <<'EOF'
           set -euo pipefail
@@ -68,6 +70,7 @@ jobs:
           WP_APP_PASSWORD=$WP_APP_PASSWORD
           GEMINI_API_KEY=$GEMINI_API_KEY
           VPS_IP=$VPS_IP
+          EDITOR_AUTH_USERS=$EDITOR_AUTH_USERS
           ENVEOF
           # Heredoc indentation: virer les espaces de tête
           sed -i 's/^[[:space:]]\+//' .env

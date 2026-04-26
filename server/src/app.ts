@@ -1,5 +1,6 @@
 import express, { type Express } from "express";
 import cors from "cors";
+import rateLimit from "express-rate-limit";
 import { client, createSession } from "./anthropic.js";
 import { generateImage, slugifyForFilename } from "./nanobanana.js";
 import {
@@ -13,6 +14,69 @@ import {
   uploadMedia,
   type WpPostInput,
 } from "./wordpress.js";
+
+// ---- Cost / usage tracking ----------------------------------------------
+// On agrège les tokens consommés via les events span.model_request_end
+// d'Anthropic, par jour UTC. Permet d'avoir un budget visible et un kill
+// switch optionnel via DAILY_COST_USD_CAP.
+type DailyUsage = {
+  date: string; // YYYY-MM-DD UTC
+  inputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  outputTokens: number;
+  imageGenerated: number;
+  sessions: number;
+};
+const usageByDay = new Map<string, DailyUsage>();
+const todayKey = () => new Date().toISOString().slice(0, 10);
+function getUsage(): DailyUsage {
+  const k = todayKey();
+  let u = usageByDay.get(k);
+  if (!u) {
+    u = {
+      date: k,
+      inputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      outputTokens: 0,
+      imageGenerated: 0,
+      sessions: 0,
+    };
+    usageByDay.set(k, u);
+  }
+  return u;
+}
+function recordModelUsage(usage: any) {
+  const u = getUsage();
+  u.inputTokens += usage?.input_tokens || 0;
+  u.cacheCreationTokens += usage?.cache_creation_input_tokens || 0;
+  u.cacheReadTokens += usage?.cache_read_input_tokens || 0;
+  u.outputTokens += usage?.output_tokens || 0;
+}
+// Pricing approximatif Sonnet 4.6 (USD par million de tokens). À ajuster
+// si on bascule sur Opus.
+const PRICE = {
+  input: 3.0 / 1_000_000,
+  output: 15.0 / 1_000_000,
+  cacheWrite: 3.75 / 1_000_000, // 25% premium sur input
+  cacheRead: 0.3 / 1_000_000, // 10% du input
+  imagePerCall: 0.024, // Nano Banana Flash 1K ~$0.024
+};
+function estimateCostUsd(u: DailyUsage): number {
+  return (
+    u.inputTokens * PRICE.input +
+    u.outputTokens * PRICE.output +
+    u.cacheCreationTokens * PRICE.cacheWrite +
+    u.cacheReadTokens * PRICE.cacheRead +
+    u.imageGenerated * PRICE.imagePerCall
+  );
+}
+function isOverBudget(): boolean {
+  const cap = parseFloat(process.env.DAILY_COST_USD_CAP || "");
+  if (!cap || cap <= 0) return false;
+  return estimateCostUsd(getUsage()) >= cap;
+}
 
 // ---- Custom tool dispatcher ---------------------------------------------
 // Quand l'agent émet `agent.custom_tool_use`, le pump appelle dispatchCustomTool
@@ -49,6 +113,7 @@ async function dispatchCustomTool(
         alt_text: media.alt_text,
         mime_type: media.mime_type,
       });
+      getUsage().imageGenerated++;
       console.log(`[custom-tool] wp_image_generate → media #${media.id}`);
     } else if (name === "wp_publish") {
       const action = input.action;
@@ -167,6 +232,11 @@ async function startPump(sessionId: string): Promise<void> {
     if (ev?.type === "user.custom_tool_result" && ev.custom_tool_use_id) {
       pendingDispatch.delete(ev.custom_tool_use_id);
     }
+    // Cost tracking: on n'agrège que les events live (pas le backfill, qui
+    // serait double-comptage si l'agent tourne sur plusieurs containers).
+    if (!inBackfill && ev?.type === "span.model_request_end" && ev.model_usage) {
+      recordModelUsage(ev.model_usage);
+    }
   };
 
   try {
@@ -215,8 +285,47 @@ async function startPump(sessionId: string): Promise<void> {
 
 export function createApp(): Express {
   const app = express();
+  // Confiance dans le X-Forwarded-For (Traefik est devant), pour que les
+  // rate-limit + logs voient les vraies IPs clients et pas celle de Traefik.
+  app.set("trust proxy", 1);
   app.use(cors());
   app.use(express.json({ limit: "5mb" }));
+
+  // Rate-limits par IP. Tarés pour un usage 1-utilisateur normal,
+  // bloque les abus / boucles infinies / scanners.
+  const sessionLimit = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1h
+    limit: 20,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+    message: { error: "Trop de sessions créées sur cette heure (max 20/h)." },
+  });
+  const messageLimit = rateLimit({
+    windowMs: 60 * 1000, // 1 min
+    limit: 30,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+    message: { error: "Trop de messages envoyés (max 30/min)." },
+  });
+  const writeLimit = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 10,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+    message: { error: "Trop d'écritures WP (max 10/min)." },
+  });
+
+  // Kill switch budget — bloque les nouvelles sessions + messages quand on
+  // dépasse DAILY_COST_USD_CAP. Lecture (GET) reste autorisée.
+  function budgetGuard(req: any, res: any, next: any) {
+    if (isOverBudget()) {
+      return res.status(429).json({
+        error: "Budget journalier dépassé",
+        detail: `Cap = $${process.env.DAILY_COST_USD_CAP}. Coût estimé aujourd'hui = $${estimateCostUsd(getUsage()).toFixed(2)}.`,
+      });
+    }
+    next();
+  }
 
   app.get("/api/health", (_req, res) => {
     res.json({
@@ -230,7 +339,23 @@ export function createApp(): Express {
     });
   });
 
-  app.post("/api/sessions", async (req, res) => {
+  // Stats journalières — utile pour debug coûts. Optionnellement protégeable
+  // par token via header X-Admin-Token.
+  app.get("/api/admin/stats", (req, res) => {
+    const expected = process.env.ADMIN_TOKEN;
+    if (expected && req.headers["x-admin-token"] !== expected) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+    const u = getUsage();
+    res.json({
+      ...u,
+      estimatedCostUsd: Number(estimateCostUsd(u).toFixed(4)),
+      capUsd: parseFloat(process.env.DAILY_COST_USD_CAP || "0") || null,
+      overBudget: isOverBudget(),
+    });
+  });
+
+  app.post("/api/sessions", sessionLimit, budgetGuard, async (req, res) => {
     if (!process.env.ANTHROPIC_API_KEY) {
       return res.status(503).json({
         error: "ANTHROPIC_API_KEY missing",
@@ -240,6 +365,7 @@ export function createApp(): Express {
     try {
       const title = (req.body?.title as string) || "Chat session";
       const session = await createSession(title);
+      getUsage().sessions++;
       res.json({ id: session.id, title: session.title });
     } catch (err: any) {
       console.error("[sessions] create error:", err);
@@ -261,7 +387,7 @@ export function createApp(): Express {
     }
   });
 
-  app.post("/api/sessions/:id/message", async (req, res) => {
+  app.post("/api/sessions/:id/message", messageLimit, budgetGuard, async (req, res) => {
     try {
       const { id } = req.params;
       const text = (req.body?.text as string)?.trim();
@@ -413,7 +539,7 @@ export function createApp(): Express {
   });
 
   // Image generation: prompt -> Nano Banana -> upload WP Media -> renvoie {id, url}
-  app.post("/api/image", async (req, res) => {
+  app.post("/api/image", writeLimit, budgetGuard, async (req, res) => {
     try {
       const prompt = (req.body?.prompt as string)?.trim();
       const altText = (req.body?.alt_text as string) || "";
@@ -424,6 +550,7 @@ export function createApp(): Express {
 
       console.log(`[image] generate "${prompt.slice(0, 80)}..."`);
       const img = await generateImage({ prompt, aspectRatio, imageSize });
+      getUsage().imageGenerated++;
       const ext = img.mimeType === "image/jpeg" ? "jpg" : "png";
       const filename = `${slugifyForFilename(title || prompt) || "agent-image"}.${ext}`;
 
@@ -447,7 +574,7 @@ export function createApp(): Express {
     }
   });
 
-  app.post("/api/wp/posts", async (req, res) => {
+  app.post("/api/wp/posts", writeLimit, async (req, res) => {
     try {
       const post = await createPost(req.body as WpPostInput);
       res.json(post);
@@ -457,7 +584,7 @@ export function createApp(): Express {
     }
   });
 
-  app.put("/api/wp/posts/:id", async (req, res) => {
+  app.put("/api/wp/posts/:id", writeLimit, async (req, res) => {
     try {
       const id = Number(req.params.id);
       const post = await updatePost(id, req.body as WpPostInput);
