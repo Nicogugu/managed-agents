@@ -291,6 +291,35 @@ export function createApp(): Express {
   app.use(cors());
   app.use(express.json({ limit: "5mb" }));
 
+  // Basic Auth gate sur tous les /api sauf /api/health (laissé public pour
+  // les health checks externes / smoke tests). Active si AUTH_USER+AUTH_PASS
+  // sont set en env. Sinon (dev local) auth désactivée.
+  if (process.env.AUTH_USER && process.env.AUTH_PASS) {
+    const expectedUser = process.env.AUTH_USER;
+    const expectedPass = process.env.AUTH_PASS;
+    app.use((req, res, next) => {
+      if (req.path === "/api/health" || !req.path.startsWith("/api")) return next();
+      const auth = req.headers.authorization;
+      if (!auth?.startsWith("Basic ")) {
+        res.set("WWW-Authenticate", 'Basic realm="WP Editor"');
+        return res.status(401).json({ error: "Auth requise" });
+      }
+      try {
+        const decoded = Buffer.from(auth.slice(6), "base64").toString("utf8");
+        const sep = decoded.indexOf(":");
+        const u = decoded.slice(0, sep);
+        const p = decoded.slice(sep + 1);
+        if (u !== expectedUser || p !== expectedPass) {
+          res.set("WWW-Authenticate", 'Basic realm="WP Editor"');
+          return res.status(401).json({ error: "Identifiants invalides" });
+        }
+      } catch {
+        return res.status(400).json({ error: "Auth header invalide" });
+      }
+      next();
+    });
+  }
+
   // Rate-limits par IP. Tarés pour un usage 1-utilisateur normal,
   // bloque les abus / boucles infinies / scanners.
   const sessionLimit = rateLimit({

@@ -27,6 +27,8 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       GEMINI_IMAGE_MODEL: ${GEMINI_IMAGE_MODEL:-gemini-3.1-flash-image-preview}
       PUBLIC_BASE_URL: https://agent.${VPS_IP}.nip.io
+      AUTH_USER: ${AUTH_USER}
+      AUTH_PASS: ${AUTH_PASS}
       PORT: "3001"
       NODE_ENV: production
     labels:
