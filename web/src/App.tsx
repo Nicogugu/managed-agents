@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useSession } from "./useSession";
 import { sendMessage, publishDraft, fetchHealth } from "./api";
 import {
@@ -50,9 +52,15 @@ export function App() {
       }
       // 2. Texte qui stream : affiche les derniers caractères tapés
       if (m.text) {
-        // Garde le tail du texte brut, sans les blocs JSON (ils explosent en visuel)
+        // Garde le tail du texte, sans blocs JSON ni syntaxe markdown brute
+        // (**, ##, `, [...](...)) qui pollue l'affichage mono-ligne.
         const visible = m.text
           .replace(/```[\s\S]*?```/g, "")
+          .replace(/^#{1,6}\s+/gm, "")
+          .replace(/\*\*([^*]+)\*\*/g, "$1")
+          .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "$1")
+          .replace(/`([^`]+)`/g, "$1")
+          .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
           .replace(/[\s ]+/g, " ")
           .trim();
         const tail = visible.slice(-110).trim();
@@ -542,8 +550,8 @@ function MessageBubble({
       )}
 
       {visibleText && (
-        <div className="surface rounded-2xl rounded-bl-md px-3.5 py-2.5 whitespace-pre-wrap text-md leading-relaxed text-text-primary">
-          {visibleText}
+        <div className="surface rounded-2xl rounded-bl-md px-3.5 py-2.5 text-md leading-relaxed text-text-primary markdown-body">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{visibleText}</ReactMarkdown>
         </div>
       )}
 
