@@ -215,20 +215,40 @@ Ne termine JAMAIS un tour uniquement sur des appels d'outils — toujours par un
 Réponds en français. Sois concis. Sois rigoureux sur le workflow.`;
 
 const AGENT_NAME = "wp-editor";
+const AGENT_MODEL = process.env.AGENT_MODEL || "claude-sonnet-4-6";
 let cachedAgentId: string | null = null;
 
 export async function getOrCreateAgent(): Promise<string> {
   if (cachedAgentId) return cachedAgentId;
 
+  // Cherche un agent existant par nom + modèle pour éviter d'accumuler des
+  // orphelins à chaque deploy. Si modèle/system_prompt changent on en crée un
+  // nouveau (l'ancien reste accessible via son ID mais les futures sessions
+  // utilisent le nouveau).
+  try {
+    const existing = await (client.beta as any).agents.list();
+    for await (const a of existing as any) {
+      if (a.name === AGENT_NAME && a.model === AGENT_MODEL && a.system === SYSTEM_PROMPT) {
+        cachedAgentId = a.id;
+        console.log(`[anthropic] agent reused: ${a.id} (${AGENT_MODEL})`);
+        return a.id;
+      }
+    }
+  } catch (err: any) {
+    console.warn("[anthropic] agent list failed, will create:", err.message);
+  }
+
   const agent = await client.beta.agents.create({
     name: AGENT_NAME,
-    model: "claude-opus-4-7",
+    // Sonnet 4.6 = ~2-3× plus rapide qu'Opus 4.7, qualité largement suffisante
+    // pour de la rédaction éditoriale + tool use. Override via AGENT_MODEL.
+    model: AGENT_MODEL,
     system: SYSTEM_PROMPT,
     tools: [{ type: "agent_toolset_20260401" }],
   });
 
   cachedAgentId = agent.id;
-  console.log(`[anthropic] agent created: ${agent.id} v${agent.version}`);
+  console.log(`[anthropic] agent created: ${agent.id} v${agent.version} (${AGENT_MODEL})`);
   return agent.id;
 }
 
