@@ -26,6 +26,13 @@ export function useSession() {
   const [error, setError] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
   const currentAssistantId = useRef<string | null>(null);
+  // Queue de typewriter pour simuler du streaming token-par-token
+  // (l'API Managed Agents v2 délivre agent.message d'un seul bloc)
+  const typewriterQueue = useRef<string[]>([]);
+  const typewriterRunning = useRef(false);
+  // status_idle est différé tant que le typewriter n'a pas vidé sa queue,
+  // sinon la ligne d'activité disparaît avant que tout le texte soit révélé.
+  const pendingIdle = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -76,10 +83,17 @@ export function useSession() {
     switch (ev.type) {
       case "session.status_running":
         setStatus("running");
+        // Nouveau tour → on annule un éventuel idle différé d'un tour précédent
+        pendingIdle.current = false;
         break;
       case "session.status_idle":
-        setStatus("idle");
-        currentAssistantId.current = null;
+        if (typewriterRunning.current) {
+          // Le texte n'est pas encore totalement révélé — on diffère le passage en idle
+          pendingIdle.current = true;
+        } else {
+          setStatus("idle");
+          currentAssistantId.current = null;
+        }
         break;
       case "agent.message": {
         const text = (ev.content || [])
@@ -87,7 +101,9 @@ export function useSession() {
           .map((b: any) => b.text)
           .join("");
         if (!text) break;
-        appendAssistantText(text);
+        // L'API Managed Agents v2 ne stream pas les tokens (text arrive en bloc).
+        // On simule un streaming rapide côté client pour rendre l'arrivée visible.
+        enqueueTypewriterReveal(text);
         break;
       }
       case "agent.tool_use": {
@@ -118,6 +134,48 @@ export function useSession() {
       { id, role: "assistant", text: "", toolCalls: [] },
     ]);
     return id;
+  }
+
+  function enqueueTypewriterReveal(text: string) {
+    typewriterQueue.current.push(text);
+    if (!typewriterRunning.current) {
+      typewriterRunning.current = true;
+      runNextReveal();
+    }
+  }
+
+  function runNextReveal() {
+    const next = typewriterQueue.current.shift();
+    if (!next) {
+      typewriterRunning.current = false;
+      // Si on attendait un idle différé, l'appliquer maintenant
+      if (pendingIdle.current) {
+        pendingIdle.current = false;
+        setStatus("idle");
+        currentAssistantId.current = null;
+      }
+      return;
+    }
+    // Cible ~1500 chars/sec pour rester fluide même sur les longs textes.
+    // On adapte la taille du chunk au volume pour que les très gros textes
+    // (article 3000+ chars) ne mettent pas plus de ~2s à se révéler.
+    const totalDurationMs = Math.min(2000, Math.max(400, next.length * 0.7));
+    const TICK_MS = 30;
+    const ticks = Math.max(1, Math.floor(totalDurationMs / TICK_MS));
+    const charsPerTick = Math.max(2, Math.ceil(next.length / ticks));
+    let pos = 0;
+    const tick = () => {
+      const end = Math.min(pos + charsPerTick, next.length);
+      appendAssistantText(next.slice(pos, end));
+      pos = end;
+      if (pos < next.length) {
+        setTimeout(tick, TICK_MS);
+      } else {
+        // Texte courant fini → enchaîne sur le suivant si la queue n'est pas vide
+        runNextReveal();
+      }
+    };
+    tick();
   }
 
   function appendAssistantText(text: string) {
