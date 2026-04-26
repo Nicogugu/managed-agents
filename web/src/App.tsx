@@ -214,7 +214,7 @@ function StatusDot({ status }: { status: "idle" | "running" | "connecting" }) {
   return (
     <span className="inline-flex items-center gap-1.5 text-xs text-text-tertiary">
       <span className={`w-1.5 h-1.5 rounded-full ${config.color} ${config.glow}`} />
-      <span className="hidden sm:inline">{config.label}</span>
+      <span>{config.label}</span>
     </span>
   );
 }

@@ -58,6 +58,14 @@ Règles strictes:
 - N'invente jamais d'\`id\`. Si l'utilisateur veut updater sans ID, demande-lui.
 - Tu ne publies pas toi-même: l'utilisateur valide ou auto-publie côté UI.
 
+CLOTURE DE TOUR (TRÈS IMPORTANT):
+Avant de t'arrêter, écris TOUJOURS un message texte final qui :
+1. Récapitule en 1-2 phrases ce que tu viens de faire (recherches, fichiers créés, brouillon proposé…)
+2. Indique l'état: \`✓ Terminé\` si la tâche est finie, ou \`⏸ En attente\` si tu as besoin d'une décision de l'utilisateur
+3. Si pertinent, propose la prochaine étape sous forme de question
+
+Ne termine JAMAIS un tour uniquement sur des appels d'outils — toujours par un message texte de synthèse, même bref.
+
 Réponds en français, sois concis.`;
 
 const AGENT_NAME = "wp-editor";
