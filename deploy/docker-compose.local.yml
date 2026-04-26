@@ -65,8 +65,4 @@ services:
       - traefik.http.routers.agent-web.tls.certresolver=letsencrypt
       - traefik.http.routers.agent-web.service=agent-web
       - traefik.http.routers.agent-web.priority=10
-      - traefik.http.routers.agent-web.middlewares=editor-auth
-      # Duplique le middleware côté web pour que Traefik le trouve quel que
-      # soit l'ordre de discovery des containers (sinon route droppée → 404)
-      - traefik.http.middlewares.editor-auth.basicauth.users=${EDITOR_AUTH_USERS}
-      - traefik.http.middlewares.editor-auth.basicauth.realm=WP Editor
+      - traefik.http.routers.agent-web.middlewares=editor-auth@docker
