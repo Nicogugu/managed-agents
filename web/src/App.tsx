@@ -28,6 +28,32 @@ export function App() {
     }
     return [];
   }, [messages]);
+  // Activité courante de l'agent (ce qu'il fait MAINTENANT) — pour la live status line
+  const activity = useMemo(() => {
+    if (status === "idle") return null;
+    if (status === "connecting") return { icon: "⏳", text: "Connexion au stream…" };
+
+    // Cherche le dernier outil running dans le dernier message assistant
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role !== "assistant") continue;
+      const running = [...m.toolCalls].reverse().find((t) => t.status === "running");
+      if (running) {
+        return {
+          icon: toolIconChar(running.name),
+          text: `${running.name}${summarizeToolForLine(running) ? " · " + summarizeToolForLine(running) : ""}`,
+          mono: true,
+        };
+      }
+      // Si tous les outils sont done mais l'agent stream du texte → "rédaction"
+      if (m.toolCalls.length > 0 && m.text) {
+        return { icon: "✍", text: "Rédaction…" };
+      }
+      break;
+    }
+    return { icon: "✻", text: "Réflexion…" };
+  }, [messages, status]);
+
   const currentPhase = useMemo(() => {
     // Cherche la dernière phase déclarée par l'agent ("Phase: DISCOVER", "📋 Phase: PLAN"...)
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -160,6 +186,17 @@ export function App() {
           {status === "running" && <Thinking />}
         </div>
       </main>
+
+      {activity && (
+        <div className="border-t border-border bg-bg-elevated px-4 sm:px-6 py-2 flex items-center gap-2 text-sm text-text-secondary">
+          <span className="animate-pulse flex-shrink-0">{activity.icon}</span>
+          <span
+            className={`truncate min-w-0 ${activity.mono ? "font-mono text-xs" : ""}`}
+          >
+            {activity.text}
+          </span>
+        </div>
+      )}
 
       <footer className="border-t border-border bg-bg-primary">
         <div className="max-w-3xl mx-auto p-3 sm:p-4">
@@ -703,6 +740,50 @@ function ToolIcon({ name }: { name: string }) {
     web_fetch: "↓",
   };
   return <span className="font-mono text-[10px] mr-0.5 opacity-70">{icons[name] || "•"}</span>;
+}
+
+function toolIconChar(name: string): string {
+  return (
+    {
+      bash: "›_",
+      read: "📄",
+      write: "✎",
+      edit: "✎",
+      glob: "*",
+      grep: "⌕",
+      web_search: "⌕",
+      web_fetch: "↓",
+    } as Record<string, string>
+  )[name] || "🔧";
+}
+
+function summarizeToolForLine(call: { name: string; input?: Record<string, any> }): string {
+  const i = call.input || {};
+  const raw = (() => {
+    switch (call.name) {
+      case "bash":
+        return i.command || "";
+      case "web_fetch":
+        return i.url || "";
+      case "web_search":
+        return i.query || "";
+      case "read":
+      case "write":
+      case "edit":
+        return i.path || i.file_path || "";
+      case "glob":
+      case "grep":
+        return i.pattern || "";
+      default: {
+        const v = Object.values(i).find(
+          (x) => typeof x === "string" || typeof x === "number",
+        );
+        return v ? String(v) : "";
+      }
+    }
+  })();
+  // Tronque agressivement pour la ligne unique
+  return raw.replace(/\s+/g, " ").slice(0, 90);
 }
 
 function summarizeTool(call: { name: string; input?: Record<string, any> }): string {
