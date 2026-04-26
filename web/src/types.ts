@@ -66,3 +66,9 @@ export type WpAsk = {
 };
 
 export type Mode = "validate" | "auto";
+
+// État de publication d'un draft (auto-publish ou modal)
+export type PublishState =
+  | { status: "pending" }
+  | { status: "published"; id: number; link: string }
+  | { status: "error"; error: string };

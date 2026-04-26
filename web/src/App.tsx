@@ -1,38 +1,30 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "./useSession";
 import { sendMessage, publishDraft, fetchHealth } from "./api";
-import {
-  extractAsks,
-  extractDrafts,
-  extractPlans,
-  extractTodos,
-  stripBlocks,
-} from "./parseDraft";
+import { extractDrafts, extractTodos } from "./parseDraft";
 import { PublishModal } from "./PublishModal";
 import {
-  type ChatMessage,
   type Mode,
-  type TodoItem,
-  type WpAsk,
+  type PublishState,
   type WpDraft,
-  type WpPlan,
   assistantText,
   assistantToolCalls,
 } from "./types";
+import { friendlyLabel, summarizeToolForLine, toolIconChar } from "./lib/toolLabels";
+import { Header } from "./components/Header";
+import { EmptyState } from "./components/EmptyState";
+import { TodosBar } from "./components/TodosBar";
+import { Thinking } from "./components/Thinking";
+import { MessageBubble } from "./components/MessageBubble";
+import { Toast } from "./components/Toast";
+import { ChatInput } from "./components/ChatInput";
 
 type Health = { ok: boolean; anthropicKey: boolean; wpConfigured: boolean };
 
-type PublishState =
-  | { status: "pending" }
-  | { status: "published"; id: number; link: string }
-  | { status: "error"; error: string };
-
 export function App() {
   const { sessionId, messages, status, error, lastEventAt, appendUserMessage, newSession } = useSession();
-  // Tick toutes les secondes quand l'agent travaille pour afficher l'âge du
-  // dernier event (silence prolongé = peut-être bloqué)
+
+  // ------- Activity tracking ------------------------------------------------
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     if (status !== "running") return;
@@ -40,15 +32,45 @@ export function App() {
     return () => clearInterval(t);
   }, [status]);
   const silenceSec =
-    status === "running" && lastEventAt > 0
-      ? Math.floor((now - lastEventAt) / 1000)
-      : 0;
-  const [input, setInput] = useState("");
-  const [todosOpen, setTodosOpen] = useState(false);
-  const [textInputOpen, setTextInputOpen] = useState(false);
-  // Pour chaque ask cliqué (clé = "messageId#askIdx"), on stocke le label choisi
-  const [askAnswered, setAskAnswered] = useState<Record<string, string>>({});
-  // Todos courantes = dernier checklist non-vide trouvé dans un message assistant
+    status === "running" && lastEventAt > 0 ? Math.floor((now - lastEventAt) / 1000) : 0;
+
+  const activity = useMemo(() => {
+    if (status === "idle") return null;
+    if (status === "connecting") return { icon: "⏳", text: "Connexion au stream…" };
+
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role !== "assistant") continue;
+      const running = [...assistantToolCalls(m)].reverse().find((t) => t.status === "running");
+      if (running) {
+        const summary = summarizeToolForLine(running);
+        const verb = friendlyLabel(running).verb;
+        return {
+          icon: toolIconChar(running.name),
+          text: summary || verb,
+          mono: false,
+        };
+      }
+      const fullText = assistantText(m);
+      if (fullText) {
+        const visible = fullText
+          .replace(/```[\s\S]*?```/g, "")
+          .replace(/^#{1,6}\s+/gm, "")
+          .replace(/\*\*([^*]+)\*\*/g, "$1")
+          .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "$1")
+          .replace(/`([^`]+)`/g, "$1")
+          .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+          .replace(/[\s ]+/g, " ")
+          .trim();
+        const tail = visible.slice(-110).trim();
+        if (tail) return { icon: "✍", text: "… " + tail };
+      }
+      break;
+    }
+    return { icon: "✻", text: "Réflexion…" };
+  }, [messages, status]);
+
+  // ------- Todos + phase ----------------------------------------------------
   const todos = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
@@ -58,59 +80,22 @@ export function App() {
     }
     return [];
   }, [messages]);
-  // Activité courante de l'agent — affiche en streaming ce qu'il fait
-  const activity = useMemo(() => {
-    if (status === "idle") return null;
-    if (status === "connecting") return { icon: "⏳", text: "Connexion au stream…" };
-
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (m.role !== "assistant") continue;
-      // 1. Outil en cours : affiche son nom + argument principal
-      const running = [...assistantToolCalls(m)].reverse().find((t) => t.status === "running");
-      if (running) {
-        const summary = summarizeToolForLine(running);
-        return {
-          icon: toolIconChar(running.name),
-          text: summary ? `${running.name} · ${summary}` : `${running.name}…`,
-          mono: true,
-        };
-      }
-      // 2. Texte qui stream : affiche les derniers caractères tapés
-      const fullText = assistantText(m);
-      if (fullText) {
-        // Garde le tail du texte, sans blocs JSON ni syntaxe markdown brute
-        // (**, ##, `, [...](...)) qui pollue l'affichage mono-ligne.
-        const visible = fullText
-          .replace(/```[\s\S]*?```/g, "")
-          .replace(/^#{1,6}\s+/gm, "")
-          .replace(/\*\*([^*]+)\*\*/g, "$1")
-          .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "$1")
-          .replace(/`([^`]+)`/g, "$1")
-          .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-          .replace(/[\s ]+/g, " ")
-          .trim();
-        const tail = visible.slice(-110).trim();
-        if (tail) {
-          return { icon: "✍", text: "… " + tail };
-        }
-      }
-      break;
-    }
-    return { icon: "✻", text: "Réflexion…" };
-  }, [messages, status]);
 
   const currentPhase = useMemo(() => {
-    // Cherche la dernière phase déclarée par l'agent ("Phase: DISCOVER", "📋 Phase: PLAN"...)
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
       if (m.role !== "assistant") continue;
-      // Tolère le markdown bold autour du nom de phase: "Phase: **PLAN**" ou "Phase: PLAN"
-      const match = assistantText(m).match(/Phase\s*:?\s*\*{0,2}\s*(DISCOVER|PLAN|DRAFT|REVIEW|PUBLISH)\s*\*{0,2}/i);
+      const match = assistantText(m).match(
+        /Phase\s*:?\s*\*{0,2}\s*(DISCOVER|PLAN|DRAFT|REVIEW|PUBLISH)\s*\*{0,2}/i,
+      );
       if (match) return match[1].toUpperCase();
     }
     return null;
   }, [messages]);
+
+  const [todosOpen, setTodosOpen] = useState(false);
+
+  // ------- Mode + askAnswered + publishedDrafts -----------------------------
   const [mode, setMode] = useState<Mode>(() => {
     if (typeof localStorage === "undefined") return "auto";
     const saved = localStorage.getItem("mode");
@@ -119,19 +104,14 @@ export function App() {
   useEffect(() => {
     if (typeof localStorage !== "undefined") localStorage.setItem("mode", mode);
   }, [mode]);
+
+  const [askAnswered, setAskAnswered] = useState<Record<string, string>>({});
   const [pendingDraft, setPendingDraft] = useState<WpDraft | null>(null);
-  // Toast peut être un texte simple ou un objet avec un lien cliquable
   const [toast, setToast] = useState<{ text: string; link?: string } | null>(null);
-  // Map "messageId#draftIdx" → état de publication. Permet d'afficher un
-  // status pending/published/error EN CONTINU sur la DraftCard, sans
-  // 'blanc' silencieux si la publi échoue ou prend du temps.
-  const [publishedDrafts, setPublishedDrafts] = useState<
-    Record<string, PublishState>
-  >({});
+  const [publishedDrafts, setPublishedDrafts] = useState<Record<string, PublishState>>({});
   const [health, setHealth] = useState<Health | null>(null);
   const handledDrafts = useRef<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     fetchHealth().then(setHealth).catch(() => {});
@@ -148,7 +128,6 @@ export function App() {
         if (handledDrafts.current.has(key)) continue;
         handledDrafts.current.add(key);
         const isUpdate = drafts[i].action === "update";
-        // Marque pending tout de suite pour que la DraftCard montre l'état
         setPublishedDrafts((prev) => ({ ...prev, [key]: { status: "pending" } }));
         publishDraft({ ...drafts[i], status: "publish" })
           .then((post: any) => {
@@ -184,22 +163,10 @@ export function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  // Auto-resize textarea
-  useEffect(() => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    ta.style.height = "auto";
-    ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
-  }, [input]);
-
-  // Permet d'envoyer même quand l'agent travaille — Anthropic queue les
-  // user.message dans la session, l'agent les traite dans le tour suivant
-  // (ou les absorbe dans le tour en cours selon le timing).
-  async function handleSend() {
-    if (!sessionId || !input.trim()) return;
-    const text = input.trim();
+  // ------- Send handlers ----------------------------------------------------
+  async function sendText(text: string) {
+    if (!sessionId) return;
     appendUserMessage(text);
-    setInput("");
     try {
       await sendMessage(sessionId, text);
     } catch (err: any) {
@@ -218,7 +185,7 @@ export function App() {
   }
 
   async function answerAsk(askKey: string, label: string, value: string) {
-    if (askAnswered[askKey]) return; // déjà répondu
+    if (askAnswered[askKey]) return;
     setAskAnswered((prev) => ({ ...prev, [askKey]: label }));
     await sendClick(label, value);
   }
@@ -234,10 +201,13 @@ export function App() {
         onNewSession={() => {
           if (
             messages.length === 0 ||
-            window.confirm("Démarrer une nouvelle session ? L'historique reste dans Anthropic mais l'interface part à zéro.")
+            window.confirm(
+              "Démarrer une nouvelle session ? L'historique reste dans Anthropic mais l'interface part à zéro.",
+            )
           ) {
             setAskAnswered({});
             handledDrafts.current = new Set();
+            setPublishedDrafts({});
             void newSession();
           }
         }}
@@ -261,11 +231,12 @@ export function App() {
           )}
           {health && !health.anthropicKey && (
             <div className="surface bg-amber-500/5 border-amber-500/30 text-amber-200 text-sm rounded-md p-3">
-              <span className="font-medium">ANTHROPIC_API_KEY manquante</span> · ajoute-la dans <code className="font-mono text-xs">server/.env</code>
+              <span className="font-medium">ANTHROPIC_API_KEY manquante</span> · ajoute-la dans{" "}
+              <code className="font-mono text-xs">server/.env</code>
             </div>
           )}
           {messages.length === 0 && !error && (
-            <EmptyState onPick={sendClick} disabled={!sessionId || status === "running"} />
+            <EmptyState onPick={sendClick} disabled={!sessionId} />
           )}
           {messages.map((m) => (
             <MessageBubble
@@ -279,79 +250,14 @@ export function App() {
               askAnsweredFor={(askIdx) => askAnswered[`${m.id}#${askIdx}`]}
               publishedFor={(draftIdx) => publishedDrafts[`${m.id}#${draftIdx}`]}
               onApprovePlan={() => sendClick("✓ vasy", "vasy")}
-              disabled={status === "running"}
+              disabled={false}
             />
           ))}
           {status === "running" && <Thinking activity={activity} silenceSec={silenceSec} />}
         </div>
       </main>
 
-      <footer className="border-t border-border bg-bg-primary">
-        <div className="max-w-3xl mx-auto p-3 sm:p-4">
-          {textInputOpen ? (
-            <>
-              <div className="surface rounded-xl flex items-end gap-2 p-2 focus-within:border-border-strong transition-colors">
-                <textarea
-                  ref={textareaRef}
-                  className="flex-1 bg-transparent border-0 resize-none px-2 py-1.5 text-md placeholder:text-text-muted focus:outline-none min-h-[24px] max-h-[200px]"
-                  placeholder="Écrire à l'agent…"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                  disabled={!sessionId || status === "running"}
-                  rows={1}
-                  autoFocus
-                />
-                <button
-                  onClick={handleSend}
-                  disabled={!sessionId || !input.trim() || status === "running"}
-                  className="btn-primary self-end"
-                  aria-label="Envoyer"
-                >
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                    <path d="M2 7l10-4-3 10-2-4-5-2z" fill="currentColor" />
-                  </svg>
-                </button>
-              </div>
-              <div className="mt-2 px-1 flex items-center justify-between text-xs text-text-muted">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTextInputOpen(false);
-                    setInput("");
-                  }}
-                  className="hover:text-text-tertiary"
-                >
-                  ← Mode boutons
-                </button>
-                <span className="hidden sm:inline">
-                  Entrée pour envoyer · Shift+Entrée pour saut de ligne
-                </span>
-              </div>
-            </>
-          ) : (
-            <div className="flex items-center justify-between text-xs text-text-muted px-1">
-              <span>
-                {status === "running"
-                  ? "L'agent travaille…"
-                  : "Clique une option ci-dessus"}
-              </span>
-              <button
-                type="button"
-                onClick={() => setTextInputOpen(true)}
-                className="hover:text-text-tertiary underline"
-              >
-                ✎ Écrire
-              </button>
-            </div>
-          )}
-        </div>
-      </footer>
+      <ChatInput sessionId={sessionId} onSend={sendText} />
 
       {pendingDraft && (
         <PublishModal
@@ -363,9 +269,7 @@ export function App() {
               text: `Publié · ${pendingDraft.title?.slice(0, 50) || `#${post.id}`}`,
               link: post.link,
             });
-            // Trouve la draft card pour la mettre à jour avec le lien.
-            // On match par draft (titre+slug) — heuristique simple mais ok
-            // pour le mode validation où l'utilisateur clique sur UN draft.
+            // Trouve la draft card pour la mettre à jour avec le lien
             for (let mi = messages.length - 1; mi >= 0; mi--) {
               const m = messages[mi];
               if (m.role !== "assistant") continue;
@@ -377,11 +281,7 @@ export function App() {
                 ) {
                   setPublishedDrafts((prev) => ({
                     ...prev,
-                    [`${m.id}#${di}`]: {
-                      status: "published",
-                      id: post.id,
-                      link: post.link,
-                    },
+                    [`${m.id}#${di}`]: { status: "published", id: post.id, link: post.link },
                   }));
                   return;
                 }
@@ -391,833 +291,7 @@ export function App() {
         />
       )}
 
-      {toast && (
-        <div className="fixed bottom-4 right-4 surface rounded-lg shadow-elevated text-sm px-4 py-2.5 max-w-sm animate-[fadeIn_120ms_ease-out]">
-          {toast.link ? (
-            <a
-              href={toast.link}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-text-primary hover:text-accent inline-flex items-center gap-1.5"
-            >
-              <span>{toast.text}</span>
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="flex-shrink-0">
-                <path d="M14 3h7v7" /><path d="M10 14L21 3" /><path d="M21 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h6" />
-              </svg>
-            </a>
-          ) : (
-            toast.text
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Header({
-  sessionId,
-  status,
-  health,
-  mode,
-  onModeChange,
-  onNewSession,
-}: {
-  sessionId: string | null;
-  status: "idle" | "running" | "connecting";
-  health: Health | null;
-  mode: Mode;
-  onModeChange: (m: Mode) => void;
-  onNewSession: () => void;
-}) {
-  return (
-    <header className="border-b border-border bg-bg-primary/80 backdrop-blur-md sticky top-0 z-10">
-      <div className="max-w-3xl mx-auto flex items-center justify-between gap-3 px-4 sm:px-6 h-12">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="w-5 h-5 rounded bg-accent/20 border border-accent/30 flex items-center justify-center flex-shrink-0">
-            <span className="text-accent text-[10px] font-bold">W</span>
-          </div>
-          <h1 className="text-md font-semibold tracking-tight truncate">WP Editor</h1>
-          <StatusDot status={status} />
-          {health && !health.anthropicKey && (
-            <span className="pill !text-amber-300 !border-amber-500/40 !bg-amber-500/10 hidden sm:inline-flex">
-              no key
-            </span>
-          )}
-        </div>
-        <ModeToggle mode={mode} onChange={onModeChange} />
-      </div>
-      {sessionId && (
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 pb-2 flex items-center justify-between gap-2">
-          <span className="text-xs text-text-muted font-mono truncate">
-            {sessionId}
-          </span>
-          <button
-            type="button"
-            onClick={onNewSession}
-            className="text-xs text-text-muted hover:text-text-secondary underline flex-shrink-0"
-          >
-            ＋ nouvelle session
-          </button>
-        </div>
-      )}
-    </header>
-  );
-}
-
-function StatusDot({ status }: { status: "idle" | "running" | "connecting" }) {
-  const config = {
-    idle: { color: "bg-emerald-500", label: "ready", glow: "shadow-[0_0_8px_rgba(16,185,129,0.6)]" },
-    running: { color: "bg-amber-500", label: "thinking", glow: "shadow-[0_0_8px_rgba(245,158,11,0.6)] animate-pulse" },
-    connecting: { color: "bg-text-muted", label: "connecting", glow: "" },
-  }[status];
-  return (
-    <span className="inline-flex items-center gap-1.5 text-xs text-text-tertiary">
-      <span className={`w-1.5 h-1.5 rounded-full ${config.color} ${config.glow}`} />
-      <span>{config.label}</span>
-    </span>
-  );
-}
-
-function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => void }) {
-  return (
-    <div className="inline-flex bg-bg-tertiary border border-border rounded-md p-0.5 text-xs">
-      <button
-        onClick={() => onChange("validate")}
-        className={`px-2 sm:px-3 py-1 rounded transition-colors ${
-          mode === "validate"
-            ? "bg-bg-elevated text-text-primary shadow-sm"
-            : "text-text-tertiary hover:text-text-secondary"
-        }`}
-      >
-        Validation
-      </button>
-      <button
-        onClick={() => onChange("auto")}
-        className={`px-2 sm:px-3 py-1 rounded transition-colors ${
-          mode === "auto"
-            ? "bg-bg-elevated text-text-primary shadow-sm"
-            : "text-text-tertiary hover:text-text-secondary"
-        }`}
-      >
-        Auto-publish
-      </button>
-    </div>
-  );
-}
-
-function EmptyState({
-  onPick,
-  disabled,
-}: {
-  onPick: (label: string, value: string) => void;
-  disabled: boolean;
-}) {
-  const starters: Array<{ emoji: string; label: string; description: string; value: string }> = [
-    {
-      emoji: "💡",
-      label: "Propose-moi 5 idées d'articles",
-      description: "L'agent regarde l'existant et te suggère des angles complémentaires",
-      value:
-        "Phase DISCOVER : regarde les articles WordPress existants et propose-moi 5 idées d'articles qui complètent (pas dupliquent) le contenu actuel. Émets un bloc ```ask``` avec les 5 options pour que je clique celle que je préfère.",
-    },
-    {
-      emoji: "✍",
-      label: "Rédige un article complet maintenant",
-      description: "L'agent demande le sujet via boutons et lance le pipeline",
-      value:
-        "Je veux un nouvel article. Émets un bloc ```ask``` pour me demander le format/longueur et la thématique parmi des choix cliquables.",
-    },
-    {
-      emoji: "🔄",
-      label: "Mets à jour un article existant",
-      description: "L'agent liste les articles cliquables",
-      value:
-        "Je veux mettre à jour un article existant. Liste les 10 articles les plus récents via /api/wp/posts et émets un bloc ```ask``` avec les options cliquables.",
-    },
-    {
-      emoji: "🎨",
-      label: "Crée une brand voice depuis URLs",
-      description: "Donne 1-3 URLs d'articles dont tu aimes le style → l'agent en fait un guide réutilisable",
-      value:
-        "Je veux créer une nouvelle brand voice à partir d'URLs. Émets un bloc ```ask``` pour me demander : (1) quel type de page (article, tutorial, news, comparison, case-study, ou un nouveau slug à inventer) (2) ensuite je te donnerai 1 à 3 URLs d'articles dont j'aime le style. Tu les fetcheras, analyseras le ton/structure/vocabulaire, et écriras le résultat dans /mnt/memory/voices/{slug}.md avec sections Ton, Structure, Vocabulaire, Exemples, Quand l'utiliser.",
-    },
-    {
-      emoji: "📒",
-      label: "Mes préférences / leçons",
-      description: "Voir et éditer les règles cumulées que tu m'as apprises (chargées auto à chaque session)",
-      value:
-        "Lis /mnt/memory/wp-editor-knowledge/lessons.md et affiche-moi son contenu actuel. Ensuite émets un bloc ```ask``` pour que je puisse choisir : (a) ajouter une nouvelle règle, (b) supprimer une règle existante, (c) tout est bon, on continue.",
-    },
-    {
-      emoji: "🖼️",
-      label: "Génère juste une image",
-      description: "Sans article, juste une image dans WP Media",
-      value:
-        "Je veux générer une image (sans article). Émets un bloc ```ask``` pour me demander le sujet/style parmi des choix.",
-    },
-  ];
-  return (
-    <div className="py-6 sm:py-10">
-      <div className="text-center mb-6">
-        <div className="text-text-secondary text-md mb-1">Article Code</div>
-        <div className="text-text-muted text-sm">
-          Clique pour démarrer — l'agent te guide en mode boutons.
-        </div>
-      </div>
-      <div className="flex flex-col gap-2 max-w-md mx-auto">
-        {starters.map((s) => (
-          <button
-            key={s.label}
-            type="button"
-            onClick={() => onPick(s.label, s.value)}
-            disabled={disabled}
-            className="surface rounded-lg px-4 py-3 text-left hover:bg-bg-tertiary hover:border-accent/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-start gap-3"
-          >
-            <span className="text-xl flex-shrink-0 leading-none mt-0.5">{s.emoji}</span>
-            <span className="flex-1 min-w-0">
-              <span className="block text-sm text-text-primary font-medium">{s.label}</span>
-              <span className="block text-xs text-text-tertiary mt-0.5">{s.description}</span>
-            </span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Thinking({
-  activity,
-  silenceSec,
-}: {
-  activity: { icon: string; text: string; mono?: boolean } | null;
-  silenceSec: number;
-}) {
-  return (
-    <div className="flex items-start gap-2 text-xs text-text-muted px-1 py-2">
-      <div className="flex gap-1 mt-1.5 flex-shrink-0">
-        {[0, 150, 300].map((d) => (
-          <span
-            key={d}
-            className="w-1 h-1 rounded-full bg-text-muted animate-pulse"
-            style={{ animationDelay: `${d}ms` }}
-          />
-        ))}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 text-text-muted">
-          <span>l'agent travaille…</span>
-          {silenceSec >= 3 && (
-            <span
-              className={`tabular-nums ${
-                silenceSec >= 30 ? "text-amber-400" : "text-text-muted"
-              }`}
-            >
-              {silenceSec}s
-            </span>
-          )}
-        </div>
-        {activity && (
-          <div className="mt-0.5 flex items-center gap-1.5 text-text-secondary overflow-hidden whitespace-nowrap">
-            <span className="flex-shrink-0 animate-pulse">{activity.icon}</span>
-            <span
-              className={`truncate ${activity.mono ? "font-mono text-[11px]" : ""}`}
-            >
-              {activity.text}
-            </span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function MessageBubble({
-  message,
-  mode,
-  onPublish,
-  onAnswerAsk,
-  askAnsweredFor,
-  publishedFor,
-  onApprovePlan,
-  disabled,
-}: {
-  message: ChatMessage;
-  mode: Mode;
-  onPublish: (draft: WpDraft) => void;
-  onAnswerAsk: (askIdx: number, label: string, value: string) => void;
-  askAnsweredFor: (askIdx: number) => string | undefined;
-  publishedFor: (draftIdx: number) => PublishState | undefined;
-  onApprovePlan: () => void;
-  disabled: boolean;
-}) {
-  if (message.role === "user") {
-    return (
-      <div className="flex justify-end">
-        <div className="bg-accent/15 border border-accent/30 text-text-primary rounded-2xl rounded-br-md px-3.5 py-2 max-w-[85%] sm:max-w-[75%] whitespace-pre-wrap text-md">
-          {message.text}
-        </div>
-      </div>
-    );
-  }
-
-  // Texte cumulé pour extraire les blocs spéciaux (wp-plan, wp-post, ask).
-  // Note: ces extracteurs s'appliquent au texte total, pas par block —
-  // l'agent peut splitter un bloc JSON sur plusieurs events texte.
-  const fullText = useMemo(() => assistantText(message), [message]);
-  const drafts = useMemo(() => extractDrafts(fullText), [fullText]);
-  const plans = useMemo(() => extractPlans(fullText), [fullText]);
-  const asks = useMemo(() => extractAsks(fullText), [fullText]);
-
-  // On compte les indices au fil de l'eau pour mapper les Draft/Plan/Ask
-  // au bon ordre du flux et garder le keying stable.
-  let draftIdx = 0;
-  let planIdx = 0;
-  let askIdx = 0;
-
-  return (
-    <div className="flex flex-col gap-2 max-w-[92%] sm:max-w-[85%]">
-      {message.blocks.map((block, i) => {
-        if (block.type === "tool") {
-          return <ToolCallRow key={`b-${i}`} call={block.call} />;
-        }
-        // Block texte — on extrait les éléments spéciaux qu'il contient pour
-        // les rendre comme cartes spécialisées DANS l'ordre chronologique,
-        // et on affiche le texte restant en bulle markdown.
-        const blockDrafts = extractDrafts(block.text);
-        const blockPlans = extractPlans(block.text);
-        const blockAsks = extractAsks(block.text);
-        const visible = stripBlocks(block.text);
-        const elements: JSX.Element[] = [];
-        if (visible) {
-          elements.push(
-            <div
-              key={`b-${i}-text`}
-              className="surface rounded-2xl rounded-bl-md px-3.5 py-2.5 text-md leading-relaxed text-text-primary markdown-body"
-            >
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{visible}</ReactMarkdown>
-            </div>,
-          );
-        }
-        for (const plan of blockPlans) {
-          const idx = planIdx++;
-          elements.push(
-            <PlanCard
-              key={`b-${i}-plan-${idx}`}
-              plan={plan}
-              onApprove={onApprovePlan}
-              disabled={disabled}
-            />,
-          );
-        }
-        for (const draft of blockDrafts) {
-          const idx = draftIdx++;
-          elements.push(
-            <DraftCard
-              key={`b-${i}-draft-${idx}`}
-              draft={draft}
-              mode={mode}
-              onPublish={() => onPublish(draft)}
-              published={publishedFor(idx)}
-            />,
-          );
-        }
-        for (const ask of blockAsks) {
-          const idx = askIdx++;
-          elements.push(
-            <AskCard
-              key={`b-${i}-ask-${idx}`}
-              ask={ask}
-              onClick={(label, value) => onAnswerAsk(idx, label, value)}
-              answered={askAnsweredFor(idx)}
-              disabled={disabled}
-            />,
-          );
-        }
-        return <Fragment key={`b-${i}`}>{elements}</Fragment>;
-      })}
-      {/* Si l'agent a émis du texte/blocs hors d'un block (impossible
-          actuellement) on aurait un fallback ici — laissé vide pour l'instant. */}
-      {void [drafts, plans, asks]}
-    </div>
-  );
-}
-
-function AskCard({
-  ask,
-  onClick,
-  answered,
-  disabled,
-}: {
-  ask: WpAsk;
-  onClick: (label: string, value: string) => void;
-  answered?: string;
-  disabled: boolean;
-}) {
-  // Cas répondu: on collapse en une seule ligne récap
-  if (answered) {
-    return (
-      <div className="surface rounded-lg px-3 py-2 bg-bg-tertiary/40 border-border flex items-center gap-2 text-sm">
-        <span className="text-emerald-500 flex-shrink-0">✓</span>
-        {ask.question && (
-          <span className="text-text-muted flex-shrink-0">{ask.question}</span>
-        )}
-        <span className="text-text-primary font-medium truncate">{answered}</span>
-      </div>
-    );
-  }
-  return (
-    <div className="surface rounded-xl p-3 sm:p-4 bg-accent-subtle border-accent/20">
-      {ask.question && (
-        <div className="text-sm text-text-primary font-medium mb-3">{ask.question}</div>
-      )}
-      <div className="flex flex-col gap-2">
-        {ask.options.map((opt, i) => (
-          <button
-            key={i}
-            type="button"
-            onClick={() => onClick(opt.label, opt.value)}
-            disabled={disabled}
-            className="w-full text-left px-3 py-2 rounded-lg border border-border bg-bg-tertiary hover:bg-bg-elevated hover:border-accent/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-start gap-2"
-          >
-            {opt.emoji && (
-              <span className="text-lg flex-shrink-0 leading-none mt-0.5">{opt.emoji}</span>
-            )}
-            <span className="flex-1 min-w-0">
-              <span className="block text-sm text-text-primary font-medium">{opt.label}</span>
-              {opt.description && (
-                <span className="block text-xs text-text-tertiary mt-0.5">{opt.description}</span>
-              )}
-            </span>
-            <span className="text-text-muted flex-shrink-0">→</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function PlanCard({
-  plan,
-  onApprove,
-  disabled,
-}: {
-  plan: WpPlan;
-  onApprove: () => void;
-  disabled: boolean;
-}) {
-  return (
-    <div className="surface rounded-xl p-3 sm:p-4 border-amber-500/30 bg-amber-500/5">
-      <div className="flex items-center gap-2 mb-2">
-        <span className="pill !text-amber-300 !border-amber-500/40 !bg-amber-500/10 uppercase tracking-wide">
-          📋 brief
-        </span>
-        {plan.wordCount && (
-          <span className="pill text-text-tertiary">~{plan.wordCount} mots</span>
-        )}
-      </div>
-      {plan.title && (
-        <div className="font-semibold text-text-primary text-md mb-1">{plan.title}</div>
-      )}
-      {plan.slug && (
-        <div className="text-xs font-mono text-text-muted mb-2">/{plan.slug}</div>
-      )}
-      {plan.outline && plan.outline.length > 0 && (
-        <ul className="text-sm text-text-secondary list-disc list-inside space-y-0.5 mb-2">
-          {plan.outline.map((h, i) => (
-            <li key={i}>{h}</li>
-          ))}
-        </ul>
-      )}
-      <div className="flex flex-wrap gap-1 mb-2">
-        {plan.category && (
-          <span className="pill text-text-tertiary">📁 {plan.category}</span>
-        )}
-        {(plan.tags || []).map((t) => (
-          <span key={t} className="pill text-text-tertiary">#{t}</span>
-        ))}
-      </div>
-      {plan.image?.needed && plan.image.prompt && (
-        <div className="text-xs text-text-tertiary mt-2 border-t border-border pt-2">
-          🎨 <span className="font-mono">{plan.image.prompt}</span>
-        </div>
-      )}
-      {plan.sources && plan.sources.length > 0 && (
-        <details className="mt-2 text-xs">
-          <summary className="text-text-muted cursor-pointer">{plan.sources.length} source(s)</summary>
-          <ul className="mt-1 space-y-0.5 text-text-tertiary">
-            {plan.sources.map((s, i) => (
-              <li key={i} className="truncate">
-                <a href={s} target="_blank" rel="noreferrer" className="hover:text-accent">
-                  {s}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-      <div className="mt-3 flex justify-end">
-        <button
-          type="button"
-          onClick={onApprove}
-          disabled={disabled}
-          className="btn-primary"
-        >
-          ✓ Approuver et drafter
-        </button>
-      </div>
-    </div>
-  );
-}
-
-const PHASE_LABELS: Record<string, { emoji: string; label: string }> = {
-  DISCOVER: { emoji: "🔍", label: "Discover" },
-  PLAN: { emoji: "📋", label: "Plan" },
-  DRAFT: { emoji: "✍", label: "Draft" },
-  REVIEW: { emoji: "🔎", label: "Review" },
-  PUBLISH: { emoji: "🚀", label: "Publish" },
-};
-
-function TodosBar({
-  todos,
-  phase,
-  open,
-  onToggle,
-}: {
-  todos: TodoItem[];
-  phase: string | null;
-  open: boolean;
-  onToggle: () => void;
-}) {
-  const done = todos.filter((t) => t.status === "done").length;
-  const inProgress = todos.find((t) => t.status === "in_progress");
-  const pct = todos.length === 0 ? 0 : (done / todos.length) * 100;
-  const phaseInfo = phase ? PHASE_LABELS[phase] : null;
-
-  return (
-    <div className="border-b border-border bg-bg-elevated">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="w-full flex items-center gap-2 px-4 sm:px-6 py-2 text-left hover:bg-bg-tertiary transition-colors"
-      >
-        {phaseInfo && (
-          <span className="flex items-center gap-1 text-sm font-medium text-text-primary flex-shrink-0">
-            <span>{phaseInfo.emoji}</span>
-            <span>{phaseInfo.label}</span>
-          </span>
-        )}
-        {todos.length > 0 && (
-          <>
-            <span className="text-text-muted">·</span>
-            <span className="flex-1 min-w-0">
-              {inProgress ? (
-                <span className="text-xs text-text-secondary truncate inline-block max-w-full align-middle">
-                  <span className="text-amber-400 mr-1 animate-pulse">▸</span>
-                  {inProgress.text}
-                </span>
-              ) : (
-                <span className="text-xs text-text-muted">
-                  {done === todos.length ? "tout terminé" : "en attente"}
-                </span>
-              )}
-            </span>
-            <span className="text-xs text-text-tertiary flex-shrink-0 font-mono tabular-nums">
-              {done}/{todos.length}
-            </span>
-          </>
-        )}
-        <span className="text-text-muted text-sm flex-shrink-0">
-          {open ? "▾" : "▸"}
-        </span>
-      </button>
-
-      {todos.length > 0 && (
-        <div
-          className="h-0.5 bg-emerald-500/70 transition-all duration-300"
-          style={{ width: `${pct}%` }}
-        />
-      )}
-
-      {open && todos.length > 0 && (
-        <ul className="px-4 sm:px-6 py-2 space-y-1 border-t border-border max-h-[50vh] overflow-auto">
-          {todos.map((t, i) => (
-            <li key={i} className="flex items-start gap-2 text-sm">
-              <span className="mt-0.5 flex-shrink-0 w-4 text-center">
-                {t.status === "done" ? (
-                  <span className="text-emerald-500">✓</span>
-                ) : t.status === "in_progress" ? (
-                  <span className="text-amber-400 animate-pulse">▸</span>
-                ) : (
-                  <span className="text-text-muted">○</span>
-                )}
-              </span>
-              <span
-                className={
-                  t.status === "done"
-                    ? "text-text-muted line-through"
-                    : t.status === "in_progress"
-                    ? "text-text-primary font-medium"
-                    : "text-text-secondary"
-                }
-              >
-                {t.text}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-// Labels user-friendly pour chaque appel d'outil. On déduit du nom + input
-// une description compréhensible en français au lieu d'afficher 'web_fetch'
-// avec une URL brute.
-type FriendlyLabel = { icon: string; verb: string; detail?: string };
-
-function prettyPath(p?: string): string {
-  if (!p) return "";
-  if (p.startsWith("/mnt/memory/wp-editor-knowledge/")) {
-    return p.replace("/mnt/memory/wp-editor-knowledge/", "mémoire/");
-  }
-  const parts = p.split("/").filter(Boolean);
-  if (parts.length <= 2) return p;
-  return "…/" + parts.slice(-2).join("/");
-}
-
-function friendlyLabel(call: { name: string; input?: Record<string, any> }): FriendlyLabel {
-  const i = call.input || {};
-  const name = call.name;
-  switch (name) {
-    case "bash": {
-      const cmd = String(i.command || "").trim();
-      if (/^cat /.test(cmd)) {
-        return { icon: "📄", verb: "Lit", detail: prettyPath(cmd.replace(/^cat\s+/, "").split(/\s/)[0]) };
-      }
-      if (/^ls /.test(cmd)) {
-        return { icon: "📁", verb: "Liste", detail: prettyPath(cmd.replace(/^ls\s+(-\S+\s+)?/, "").split(/\s/)[0]) };
-      }
-      if (/^mkdir /.test(cmd)) {
-        return { icon: "📁", verb: "Crée dossier", detail: prettyPath(cmd.replace(/^mkdir\s+(-p\s+)?/, "").split(/\s/)[0]) };
-      }
-      if (/curl.*\/api\/image/.test(cmd)) {
-        const m = cmd.match(/"prompt":"([^"]+)"/);
-        return { icon: "🎨", verb: "Génère une image", detail: m?.[1] };
-      }
-      if (/^echo /.test(cmd)) {
-        const m = cmd.match(/echo\s+["']([^"']+)["']/);
-        return { icon: "✎", verb: "Écrit", detail: m?.[1] };
-      }
-      return { icon: "›_", verb: "Shell", detail: cmd };
-    }
-    case "read":
-      return { icon: "📄", verb: "Lit", detail: prettyPath(i.path || i.file_path) };
-    case "write":
-      return { icon: "✎", verb: "Écrit", detail: prettyPath(i.path || i.file_path) };
-    case "edit":
-      return { icon: "✎", verb: "Édite", detail: prettyPath(i.path || i.file_path) };
-    case "glob":
-      return { icon: "*", verb: "Cherche fichiers", detail: i.pattern };
-    case "grep":
-      return { icon: "⌕", verb: "Cherche dans code", detail: [i.pattern, i.path].filter(Boolean).join("  in  ") };
-    case "web_search":
-      return { icon: "🔎", verb: "Recherche web", detail: i.query };
-    case "web_fetch": {
-      const url = String(i.url || "");
-      if (url.includes("/api/wp/posts/")) {
-        const m = url.match(/\/api\/wp\/posts\/(\d+)/);
-        return { icon: "📋", verb: "Lit l'article WP", detail: m ? `#${m[1]}` : "" };
-      }
-      if (url.includes("/api/wp/posts")) {
-        const search = url.match(/[?&]search=([^&]+)/)?.[1];
-        if (search)
-          return { icon: "🔍", verb: "Cherche articles WP", detail: decodeURIComponent(search.replace(/\+/g, " ")) };
-        return { icon: "📋", verb: "Liste articles WP" };
-      }
-      if (url.includes("/api/wp/categories")) return { icon: "🏷", verb: "Liste catégories WP" };
-      if (url.includes("/api/wp/tags")) return { icon: "🏷", verb: "Liste tags WP" };
-      if (url.includes("/api/wp/media")) return { icon: "🖼", verb: "Liste médias WP" };
-      let host = url;
-      try {
-        host = new URL(url).hostname;
-      } catch {}
-      return { icon: "↓", verb: "Fetch", detail: host };
-    }
-    case "wp_image_generate":
-      return { icon: "🎨", verb: "Génère une image", detail: i.prompt };
-    case "wp_publish":
-      return {
-        icon: "🚀",
-        verb: i.action === "update" ? "Met à jour l'article WP" : "Publie l'article WP",
-        detail: i.title,
-      };
-    default:
-      return { icon: "🔧", verb: name };
-  }
-}
-
-function toolIconChar(name: string): string {
-  return friendlyLabel({ name }).icon;
-}
-
-function summarizeToolForLine(call: { name: string; input?: Record<string, any> }): string {
-  const f = friendlyLabel(call);
-  const text = f.detail ? `${f.verb} · ${f.detail}` : f.verb;
-  return text.replace(/\s+/g, " ").slice(0, 110);
-}
-
-function ToolCallRow({
-  call,
-}: {
-  call: { name: string; status: "running" | "done"; input?: Record<string, any> };
-}) {
-  const [open, setOpen] = useState(false);
-  const label = friendlyLabel(call);
-  const hasInput = call.input && Object.keys(call.input).length > 0;
-  return (
-    <div className="text-xs">
-      <button
-        type="button"
-        onClick={() => hasInput && setOpen((o) => !o)}
-        className={`flex items-center gap-2 w-full text-left px-2 py-1.5 rounded-md border transition-colors ${
-          call.status === "running"
-            ? "border-amber-500/30 bg-amber-500/5"
-            : "border-border bg-bg-tertiary/40 hover:bg-bg-tertiary"
-        }`}
-      >
-        <span className="flex items-center gap-1.5 flex-shrink-0">
-          <span className="text-base leading-none">{label.icon}</span>
-          <span className="text-text-primary font-medium">{label.verb}</span>
-          {call.status === "running" ? (
-            <span className="text-amber-400 animate-pulse">…</span>
-          ) : (
-            <span className="text-emerald-500">✓</span>
-          )}
-        </span>
-        {label.detail && (
-          <span className="text-text-tertiary truncate flex-1 min-w-0 italic">
-            {label.detail}
-          </span>
-        )}
-        {hasInput && (
-          <span className="text-text-muted flex-shrink-0">{open ? "▾" : "▸"}</span>
-        )}
-      </button>
-      {open && hasInput && (
-        <div className="mt-1 ml-4 p-2 rounded-md bg-bg-primary border border-border text-[11px]">
-          <div className="text-text-muted font-mono mb-1">{call.name}</div>
-          <pre className="text-text-secondary font-mono whitespace-pre-wrap break-all max-h-60 overflow-auto">
-            {JSON.stringify(call.input, null, 2)}
-          </pre>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DraftCard({
-  draft,
-  mode,
-  onPublish,
-  published,
-}: {
-  draft: WpDraft;
-  mode: Mode;
-  onPublish: () => void;
-  published?: PublishState;
-}) {
-  const isPublished = published?.status === "published";
-  const isPending = published?.status === "pending";
-  const isError = published?.status === "error";
-
-  const titleEl =
-    isPublished && published.status === "published" ? (
-      <a
-        href={published.link}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="font-semibold text-accent text-md truncate hover:underline inline-flex items-center gap-1"
-      >
-        {draft.title || "(sans titre)"}
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="flex-shrink-0">
-          <path d="M14 3h7v7" /><path d="M10 14L21 3" /><path d="M21 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h6" />
-        </svg>
-      </a>
-    ) : (
-      <div className="font-semibold text-text-primary text-md truncate">
-        {draft.title || "(sans titre)"}
-      </div>
-    );
-
-  return (
-    <div className="surface rounded-xl p-3 sm:p-4 border-accent/20 bg-accent-subtle">
-      <div className="flex items-start justify-between gap-3 mb-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 mb-1 flex-wrap">
-            <span className="pill pill-running !text-accent !bg-accent-subtle !border-accent/40 uppercase tracking-wide">
-              {draft.action === "create" ? "nouveau" : `update #${draft.id}`}
-            </span>
-            {isPending && (
-              <span className="pill !text-amber-300 !border-amber-500/40 !bg-amber-500/10 uppercase tracking-wide">
-                <span className="animate-pulse">📤</span> publication…
-              </span>
-            )}
-            {isPublished && published.status === "published" && (
-              <span className="pill !text-emerald-400 !border-emerald-500/40 !bg-emerald-500/10 uppercase tracking-wide">
-                ✓ publié #{published.id}
-              </span>
-            )}
-            {isError && (
-              <span className="pill !text-red-400 !border-red-500/40 !bg-red-500/10 uppercase tracking-wide">
-                ⚠ erreur
-              </span>
-            )}
-            {!published && draft.status && (
-              <span className="pill text-text-tertiary uppercase tracking-wide">{draft.status}</span>
-            )}
-          </div>
-          {titleEl}
-          {draft.excerpt && (
-            <div className="text-sm text-text-secondary mt-1 line-clamp-2">
-              {draft.excerpt}
-            </div>
-          )}
-          {isPublished && published.status === "published" && (
-            <a
-              href={published.link}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block text-xs text-accent hover:underline mt-2 truncate font-mono"
-            >
-              {published.link}
-            </a>
-          )}
-          {isError && published.status === "error" && (
-            <div className="text-xs text-red-400 mt-2">{published.error}</div>
-          )}
-        </div>
-        {!published && mode === "validate" && (
-          <button onClick={onPublish} className="btn-primary flex-shrink-0">
-            Publier
-          </button>
-        )}
-        {!published && mode === "auto" && (
-          <span className="text-xs text-text-tertiary self-center flex-shrink-0">auto…</span>
-        )}
-        {isError && (
-          <button onClick={onPublish} className="btn-secondary flex-shrink-0 text-xs">
-            Réessayer
-          </button>
-        )}
-      </div>
-      <details className="mt-2">
-        <summary className="text-xs text-text-muted cursor-pointer hover:text-text-tertiary select-none">
-          JSON brut
-        </summary>
-        <pre className="text-xs bg-bg-primary border border-border rounded-md p-2 mt-1.5 overflow-auto max-h-60 text-text-secondary font-mono">
-          {JSON.stringify(draft, null, 2)}
-        </pre>
-      </details>
+      {toast && <Toast toast={toast} />}
     </div>
   );
 }

@@ -6,10 +6,50 @@ Agent IA éditorial pour WordPress, conçu comme un Claude Code mais pour des ar
 
 ## Stack
 
-- **server/** — Node + Express + `@anthropic-ai/sdk` (v0.91+). Crée l'agent Managed, expose un proxy SSE avec backfill, dispatcher de custom tools, endpoints WP REST + génération d'image.
+- **server/** — Node + Express + `@anthropic-ai/sdk` (v0.91+). Crée l'agent Managed, expose un proxy SSE avec backfill, dispatcher de custom tools, endpoints WP REST + génération d'image, rate limit + cost tracker.
 - **web/** — Vite + React + Tailwind + react-markdown. UI click-only, parser de blocs (`wp-plan`, `wp-post`, `ask`, `todos`), DraftCard avec état pending/published/error, session persistante en localStorage.
 - **deploy/** — `docker-compose.local.yml` (build local) + `install.sh` (bootstrap VPS) + Traefik labels pour Hostinger.
 - **.github/workflows/deploy.yml** — CI auto-deploy SSH vers la VPS à chaque push.
+
+### Arborescence frontend
+
+```
+web/src/
+├── App.tsx              — orchestrateur (~300 lignes, state + side effects + layout)
+├── main.tsx             — bootstrap React
+├── useSession.ts        — hook session + SSE + typewriter + reconnect
+├── api.ts               — fetch wrappers (createSession, sendMessage, publishDraft…)
+├── parseDraft.ts        — extracteurs des blocs (wp-plan, wp-post, ask, todos)
+├── types.ts             — ChatMessage, MessageBlock, WpDraft, PublishState…
+├── PublishModal.tsx     — modal de publication (mode validation)
+├── index.css            — Tailwind + styles markdown-body
+├── lib/
+│   └── toolLabels.ts    — friendlyLabel + prettyPath + helpers
+└── components/
+    ├── Header.tsx       — header + StatusDot + ModeToggle + bouton nouvelle session
+    ├── EmptyState.tsx   — démarreurs cliquables (idées, brand voice, préférences…)
+    ├── TodosBar.tsx     — barre collapsible avec phase + progress + checklist
+    ├── Thinking.tsx     — indicateur "l'agent travaille…" + activité streaming + silence age
+    ├── MessageBubble.tsx— bulle assistant: itère sur message.blocks (tool/text)
+    ├── ToolCallRow.tsx  — pill cliquable avec icon/verb/detail + JSON expand
+    ├── AskCard.tsx      — boutons cliquables, collapse en récap après réponse
+    ├── PlanCard.tsx     — brief avec outline/tags/sources + bouton Approuver
+    ├── DraftCard.tsx    — wp-post avec état pending/published/error + lien external
+    ├── ChatInput.tsx    — footer collapsible (mode boutons / mode texte)
+    └── Toast.tsx        — notif bottom-right cliquable
+```
+
+### Arborescence backend
+
+```
+server/src/
+├── index.ts             — bootstrap Express
+├── env.ts               — chargement dotenv
+├── app.ts               — routes + SSE pump + custom tool dispatcher + rate limits + cost tracker
+├── anthropic.ts         — client SDK + system prompt + agent/env/memory store getOrCreate + custom tools schemas
+├── wordpress.ts         — WP REST API (list/get/create/update posts, categories, tags, media, dedup slug 60s)
+└── nanobanana.ts        — Gemini Flash Image API + slugifyForFilename
+```
 
 ---
 
