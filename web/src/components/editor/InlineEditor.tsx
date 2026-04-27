@@ -17,6 +17,7 @@ interface Props {
   /** Initial content (from a wp-post fence the user clicked "Editer" on). */
   seedHtml?: string | null;
   onMetaSnapshot: (meta: PostMeta) => void;
+  onMetaPatch?: (patch: Partial<PostMeta>) => void;
   onOriginalSnapshot: (blocks: DraftBlock[] | null) => void;
   onSelectionChange: (sel: Selection) => void;
   onReady: (handle: EditorHandle) => void;
@@ -45,6 +46,7 @@ export function InlineEditor({
   sessionId,
   seedHtml,
   onMetaSnapshot,
+  onMetaPatch,
   onOriginalSnapshot,
   onSelectionChange,
   onReady,
@@ -108,6 +110,9 @@ export function InlineEditor({
     onDocLoad: (op) => {
       onMetaSnapshot(op.meta);
       onOriginalSnapshot(op.blocks);
+    },
+    onMetaUpdate: (patch) => {
+      onMetaPatch?.(patch);
     },
     onAgentTouch: markTouched,
   });

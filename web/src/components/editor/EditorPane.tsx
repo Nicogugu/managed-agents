@@ -240,6 +240,15 @@ export function EditorPane({
           sessionId={sessionId}
           seedHtml={seedHtml}
           onMetaSnapshot={onSnapshotMeta}
+          onMetaPatch={(patch) => {
+            // The agent emitted a meta_update — merge into local meta state so
+            // the auto-publish hook (keyed on meta.status) re-evaluates.
+            setMeta((m) => ({
+              ...m,
+              ...patch,
+              seo: { ...m.seo, ...(patch.seo || {}) },
+            }));
+          }}
           onOriginalSnapshot={onSnapshotOriginal}
           onSelectionChange={(s) => setSelectionBlockIds(s?.block_ids ?? [])}
           onReady={setEditorHandle}

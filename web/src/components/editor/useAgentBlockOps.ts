@@ -11,6 +11,9 @@ interface Options {
   /** Called when the agent emits a doc_load (post hydration) so the parent
    * can sync the meta panel and the original snapshot for the diff view. */
   onDocLoad?: (op: Extract<BlockOp, { op: "doc_load" }>) => void;
+  /** Called when the agent emits a meta_update so the parent can update its
+   * meta state (used by auto-publish hook on meta.status changes). */
+  onMetaUpdate?: (patch: Extract<BlockOp, { op: "meta_update" }>["meta"]) => void;
   /** Called whenever a block was edited by the agent — used to highlight. */
   onAgentTouch: (blockId: string) => void;
 }
@@ -26,6 +29,7 @@ export function useAgentBlockOps({
   sessionId,
   onSnapshot,
   onDocLoad,
+  onMetaUpdate,
   onAgentTouch,
 }: Options) {
   const pendingAppends = useRef<Map<string, string>>(new Map());
@@ -119,7 +123,9 @@ export function useAgentBlockOps({
           break;
         }
         case "meta_update":
-          // Handled at the App level — no editor mutation.
+          // No editor mutation, but propagate so the parent's meta state
+          // (and the auto-publish hook keyed on meta.status) refreshes.
+          onMetaUpdate?.(op.meta);
           break;
       }
     }
