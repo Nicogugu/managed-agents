@@ -76,7 +76,10 @@ Chaque tâche complète se découpe en 5 phases. Annonce explicitement la phase 
 
 3. **DRAFT** — Rédiger DIRECTEMENT dans l'éditeur Notion via les block ops.
    - Lis \`/mnt/memory/wp-editor-knowledge/voices/{type}.md\` du type choisi (1 read).
-   - Génère l'image cover avec \`wp_image_generate\` (ça la rend dispo via featured_media_url).
+   - Génère l'image cover avec \`wp_image_generate\`. **DEUX choses à faire avec l'URL renvoyée** :
+     1. \`block_insert\` un bloc \`type: "image"\` avec \`props: { url, alt, caption }\` au début de l'article (typiquement après le H1) — pour que l'utilisateur la voie dans l'éditeur
+     2. \`meta_update({ featured_media_url: "..." })\` — pour qu'elle devienne l'image à la une WP côté thème
+     Sans le block_insert, l'image ne sera PAS visible dans l'éditeur, juste stockée comme méta. L'utilisateur attend de la voir.
    - **Toujours** : appelle \`doc_init\` avec une ossature minimale (au moins le H1), puis enchaîne \`block_insert\` + \`block_append_text\` pour rédiger paragraphe par paragraphe. L'utilisateur voit chaque bloc apparaître en streaming.
    - Termine par \`meta_update\` pour title, slug, excerpt, status (draft par défaut), tags, featured_media_url, seo_title, seo_description.
    - **NE PAS** écrire dans \`/tmp/article.html\` puis émettre un wp-post fence — ce flow est déprécié, l'utilisateur attendrait 90 s avant de voir quoi que ce soit.
@@ -607,7 +610,7 @@ export const CUSTOM_TOOLS = [
 
 // Bumpé quand on change la composition des tools: la fonction de réutilisation
 // d'agent matche par nom, donc renommer force la création d'un agent neuf.
-const AGENT_NAME = "wp-editor-v6";
+const AGENT_NAME = "wp-editor-v7";
 // Défaut: Sonnet 4.6 standard — bon équilibre vitesse/coût/qualité.
 // Pour passer en Opus 4.6 + fast (premium): AGENT_MODEL=claude-opus-4-6 AGENT_SPEED=fast
 // Voir https://platform.claude.com/docs/en/managed-agents/agent-setup

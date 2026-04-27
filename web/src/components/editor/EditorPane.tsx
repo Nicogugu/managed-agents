@@ -379,6 +379,34 @@ export function EditorPane({
         </div>
       )}
 
+      {/* Featured image banner. Shown when meta.featured_media_url is set
+          but the agent forgot to also insert a corresponding block image
+          inside the doc — at least the user sees it. */}
+      {meta.featured_media_url &&
+        !currentBlocks.some(
+          (b) =>
+            b.type === "image" &&
+            (b.props as any)?.url === meta.featured_media_url,
+        ) && (
+          <div className="px-3 pt-2 flex-shrink-0">
+            <div className="surface rounded-md flex items-center gap-2 p-2 text-xs">
+              <img
+                src={meta.featured_media_url}
+                alt=""
+                className="h-12 w-20 rounded border border-border object-cover"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-text-tertiary uppercase tracking-wide">
+                  Image à la une
+                </div>
+                <div className="text-text-muted truncate font-mono text-[11px]">
+                  {meta.featured_media_url}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
       <div className="flex-1 min-h-0 flex">
         <InlineEditor
           sessionId={sessionId}
