@@ -229,13 +229,82 @@ test.describe("Sprint 2: Superprof raw_html block", () => {
       },
     });
 
-    // The raw_html block should render the inner HTML so the editor visually
-    // shows the blockquote even though it's a single non-editable block
+    // Preview mode: the inner blockquote is rendered inside .rawhtml-block__preview
     await expect(
-      page.locator(".rawhtml-block blockquote.wp-block-superprof-quote-block"),
+      page.locator(".rawhtml-block__preview blockquote.wp-block-superprof-quote-block"),
     ).toBeVisible({ timeout: 3000 });
     await expect(
-      page.locator(".rawhtml-block blockquote.wp-block-superprof-quote-block cite"),
+      page.locator(".rawhtml-block__preview blockquote.wp-block-superprof-quote-block cite"),
     ).toContainText("Anon");
+  });
+
+  test('"Voir le HTML" toggle shows the source HTML', async ({ page }) => {
+    const state: MockState = { publishCalls: [] };
+    await setupMocks(page, state);
+    await page.goto("/");
+    await setMode(page, "validate");
+    await page.reload();
+    await expect(page.getByText(/Propose-moi 5 idées/).first()).toBeVisible({
+      timeout: 10_000,
+    });
+    await page.getByRole("button", { name: /Ouvrir l'éditeur de blocs/ }).click();
+    await expect(page.locator(".bn-editor")).toBeVisible();
+
+    const html =
+      '<!-- wp:superprof/quote-block {"quote":"X"} --><blockquote>X</blockquote><!-- /wp:superprof/quote-block -->';
+    await pushDraftOp(page, {
+      op: "block_insert",
+      after_id: null,
+      block: { id: "sp2", type: "raw_html", props: { html, raw: html } },
+    });
+    // Preview by default
+    await expect(page.locator(".rawhtml-block__preview")).toBeVisible();
+    await expect(page.locator(".rawhtml-block__source")).not.toBeVisible();
+
+    // Click toggle → source visible with the exact HTML
+    await page.getByRole("button", { name: "Voir le HTML" }).click();
+    const ta = page.locator(".rawhtml-block__source");
+    await expect(ta).toBeVisible();
+    await expect(ta).toHaveValue(html);
+
+    // Toggle back
+    await page.getByRole("button", { name: "Aperçu" }).click();
+    await expect(page.locator(".rawhtml-block__preview")).toBeVisible();
+  });
+
+  test("trailing paragraph is added so the user can click below an atom block", async ({
+    page,
+  }) => {
+    const state: MockState = { publishCalls: [] };
+    await setupMocks(page, state);
+    await page.goto("/");
+    await setMode(page, "validate");
+    await page.reload();
+    await expect(page.getByText(/Propose-moi 5 idées/).first()).toBeVisible({
+      timeout: 10_000,
+    });
+    await page.getByRole("button", { name: /Ouvrir l'éditeur de blocs/ }).click();
+    await expect(page.locator(".bn-editor")).toBeVisible();
+
+    // Doc starts with 1 placeholder paragraph. Insert a raw_html block at top.
+    await pushDraftOp(page, {
+      op: "block_insert",
+      after_id: null,
+      block: {
+        id: "atom1",
+        type: "raw_html",
+        props: { html: "<div>raw</div>", raw: "<div>raw</div>" },
+      },
+    });
+
+    // After insertion, the doc must end with a non-atom block so the user
+    // can click below to escape the selection.
+    const types = await page.evaluate(() =>
+      Array.from(document.querySelectorAll(".bn-editor .bn-block-outer"))
+        .map((el) => el.getAttribute("data-content-type"))
+        .filter(Boolean),
+    );
+    // Last block should NOT be rawHtml
+    expect(types[types.length - 1]).not.toBe("rawHtml");
   });
 });

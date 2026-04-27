@@ -72,20 +72,73 @@
 
 .bn-shell .rawhtml-block {
   display: block;
-  padding: 8px 10px;
-  margin: 4px 0;
-  border-left: 2px dashed #2e323a;
+  padding: 0;
+  margin: 8px 0;
+  border: 1px solid #2e323a;
+  border-left: 2px solid #5e6ad2;
   color: #b4bcd0;
   font-size: 13px;
   background: rgba(94, 106, 210, 0.04);
   border-radius: 4px;
+  overflow: hidden;
 }
-.bn-shell .rawhtml-block::before {
-  content: "raw HTML";
-  display: block;
+
+.bn-shell .rawhtml-block__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: #62666d;
-  margin-bottom: 4px;
+  background: rgba(94, 106, 210, 0.06);
+  border-bottom: 1px solid #2e323a;
+  user-select: none;
+}
+
+.bn-shell .rawhtml-block__label {
+  font-weight: 600;
+}
+
+.bn-shell .rawhtml-block__toggle {
+  background: transparent;
+  border: 1px solid #2e323a;
+  color: #b4bcd0;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.bn-shell .rawhtml-block__toggle:hover {
+  background: #1c1f23;
+  color: #f7f8f8;
+  border-color: #3d4148;
+}
+
+.bn-shell .rawhtml-block__preview {
+  padding: 10px 12px;
+}
+
+.bn-shell .rawhtml-block__source {
+  display: block;
+  width: 100%;
+  background: #08090a;
+  color: #d6dae0;
+  border: none;
+  border-top: 1px solid transparent;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.bn-shell .rawhtml-block__source:focus {
+  border-top-color: #5e6ad2;
 }

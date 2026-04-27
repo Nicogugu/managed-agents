@@ -63,6 +63,27 @@ export function useAgentBlockOps({
       rafRef.current = requestAnimationFrame(flushAppends);
     }
 
+    /**
+     * BlockNote/ProseMirror leave atom blocks (rawHtml, image, table) in a
+     * dead-end state if they're the very last block: clicks anywhere just
+     * keep selecting the atom block since there's no neighbour to land on.
+     * Ensure a trailing empty paragraph exists so the user can always click
+     * below to deselect or start typing.
+     */
+    function ensureTrailingParagraph() {
+      const doc = editor.document;
+      const last = doc[doc.length - 1];
+      if (!last) return;
+      const ATOMIC = new Set(["rawHtml", "image", "table"]);
+      if (ATOMIC.has(last.type)) {
+        editor.insertBlocks(
+          [{ type: "paragraph", content: "" } as any],
+          last.id,
+          "after",
+        );
+      }
+    }
+
     function applyOp(op: BlockOp, touchedId?: string) {
       switch (op.op) {
         case "doc_init":
@@ -70,6 +91,7 @@ export function useAgentBlockOps({
           const blocks = op.blocks.map(draftToBN);
           editor.replaceBlocks(editor.document.map((b: any) => b.id), blocks);
           if (op.op === "doc_load") onDocLoad?.(op);
+          ensureTrailingParagraph();
           break;
         }
         case "block_insert": {
@@ -84,6 +106,7 @@ export function useAgentBlockOps({
             editor.insertBlocks([block], editor.document[0].id, "before");
           }
           if (touchedId || op.block.id) onAgentTouch(touchedId || op.block.id);
+          ensureTrailingParagraph();
           break;
         }
         case "block_update": {
