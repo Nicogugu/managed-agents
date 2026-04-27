@@ -126,6 +126,10 @@ export function useSession() {
     // depuis le dernier event id connu.
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
+      // Don't fight a newSession() that's currently creating — it will
+      // open the SSE itself once the new id is back. Reconnecting to the
+      // old sessionIdRef would race + leak messages from the old session.
+      if (creatingSessionRef.current) return;
       const id = sessionIdRef.current;
       const es = esRef.current;
       if (!id) return;
@@ -356,7 +360,14 @@ export function useSession() {
     );
   }
 
+  // Lock to prevent double-tap creating two sessions, and to swallow
+  // a transient hang on the first createSession() right after a long
+  // mobile background (network stack waking up).
+  const creatingSessionRef = useRef(false);
+
   async function newSession() {
+    if (creatingSessionRef.current) return;
+    creatingSessionRef.current = true;
     esRef.current?.close();
     // Abort any in-flight typewriter tick from the previous session — without
     // this, a tick scheduled before setMessages([]) keeps appending old text
@@ -371,8 +382,40 @@ export function useSession() {
     setMessages([]);
     setError(null);
     setStatus("connecting");
+
+    /**
+     * Race the create against a 6s timeout, retry once on timeout/network
+     * error. Mobile browsers regularly stall the FIRST fetch right after
+     * waking from background — without this, the user sees nothing happen
+     * and has to tap "+ nouvelle session" twice.
+     */
+    async function createWithTimeout(ms = 6000): Promise<string> {
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("timeout creating session")),
+          ms,
+        );
+        createSession()
+          .then((id) => {
+            clearTimeout(timer);
+            resolve(id);
+          })
+          .catch((err) => {
+            clearTimeout(timer);
+            reject(err);
+          });
+      });
+    }
+
     try {
-      const id = await createSession();
+      let id: string;
+      try {
+        id = await createWithTimeout();
+      } catch {
+        // One fast retry — usually succeeds once the radio is awake.
+        await new Promise((r) => setTimeout(r, 400));
+        id = await createWithTimeout();
+      }
       if (typeof localStorage !== "undefined") {
         localStorage.setItem(SESSION_STORAGE_KEY, id);
       }
@@ -380,7 +423,10 @@ export function useSession() {
       sessionIdRef.current = id;
       connect(id);
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || "Échec création de session");
+      setStatus("idle");
+    } finally {
+      creatingSessionRef.current = false;
     }
   }
 
