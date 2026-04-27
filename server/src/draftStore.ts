@@ -26,6 +26,8 @@ interface DraftState {
     {
       user_edited_at?: number;
       agent_edited_at?: number;
+      /** Hard lock: agent ops are refused on this block until cleared. */
+      locked?: boolean;
     }
   >;
   /**
@@ -117,6 +119,7 @@ class Draft {
       blocks: this.state.blocks,
       meta: this.state.meta,
       original: this.state.original,
+      blockMeta: this.state.blockMeta,
     };
   }
 
@@ -166,6 +169,36 @@ class Draft {
     }
     this.state.blocks = blocks;
     this.scheduleSave();
+  }
+
+  /**
+   * Conflict gate: returns null if `op` is allowed against the current
+   * blockMeta, or an error string if the agent should be blocked. Reads:
+   * - locked=true → hard refuse
+   * - user_edited_at within USER_EDIT_WINDOW_MS → temporary refuse
+   * Used by agentBlockTools.dispatchBlockTool BEFORE applying the op.
+   */
+  checkConflict(blockId: string): string | null {
+    const meta = this.state.blockMeta[blockId];
+    if (!meta) return null;
+    if (meta.locked) return `block ${blockId} is locked by the user — refused`;
+    const userWindow = 15_000;
+    if (meta.user_edited_at && Date.now() - meta.user_edited_at < userWindow) {
+      const ago = Math.round((Date.now() - meta.user_edited_at) / 1000);
+      return `block ${blockId} was edited by the user ${ago}s ago — wait or ask the user before overwriting`;
+    }
+    return null;
+  }
+
+  /** Toggle the lock flag on a block. */
+  setBlockLocked(blockId: string, locked: boolean): boolean {
+    if (!this.state.blocks.find((b) => b.id === blockId)) return false;
+    this.state.blockMeta[blockId] = {
+      ...this.state.blockMeta[blockId],
+      locked,
+    };
+    this.scheduleSave();
+    return true;
   }
 
   /**

@@ -101,6 +101,41 @@ describe("draftStore persistence", () => {
     expect(reloaded.state.blocks.find((b: any) => b.id === "k")).toBeTruthy();
   });
 
+  it("checkConflict refuses op on locked block", async () => {
+    const sid = "sess_lock";
+    const draft = await getDraftReady(sid);
+    draft.apply({
+      op: "block_insert",
+      after_id: null,
+      block: { id: "p1", type: "paragraph", content: "x" } as any,
+    });
+    expect(draft.checkConflict("p1")).toBeNull();
+    draft.setBlockLocked("p1", true);
+    expect(draft.checkConflict("p1")).toMatch(/locked/i);
+    draft.setBlockLocked("p1", false);
+    expect(draft.checkConflict("p1")).toBeNull();
+  });
+
+  it("checkConflict refuses op on a recently user-edited block", async () => {
+    const sid = "sess_recent";
+    const draft = await getDraftReady(sid);
+    draft.setBlocksFromUser([
+      { id: "p2", type: "paragraph", content: "user typed" } as any,
+    ]);
+    expect(draft.checkConflict("p2")).toMatch(/edited by the user/i);
+  });
+
+  it("checkConflict allows op once the user-edit window passes", async () => {
+    const sid = "sess_old";
+    const draft = await getDraftReady(sid);
+    draft.setBlocksFromUser([
+      { id: "p3", type: "paragraph", content: "old" } as any,
+    ]);
+    // Backdate the user_edited_at to >15s ago
+    draft.state.blockMeta["p3"].user_edited_at = Date.now() - 30_000;
+    expect(draft.checkConflict("p3")).toBeNull();
+  });
+
   it("rejects path traversal in sessionId", async () => {
     const sid = "../escape";
     const draft = await getDraftReady(sid);

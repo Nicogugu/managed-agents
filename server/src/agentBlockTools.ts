@@ -67,6 +67,26 @@ export async function dispatchBlockTool(
     return r;
   };
 
+  // -------- Conflict gate: refuse if the agent targets a locked block or a
+  // block the user has just edited. Returns an is_error tool_result that
+  // the agent can read and adapt to.
+  const conflictTargetId =
+    name === "block_update" || name === "block_append_text" ||
+    name === "block_delete" || name === "block_move"
+      ? input?.id
+      : null;
+  if (conflictTargetId) {
+    const reason = draft.checkConflict(conflictTargetId);
+    if (reason) {
+      return {
+        content: diag(
+          `${reason}. Do NOT retry: explain to the user what you were about to change and wait for their explicit go-ahead.`,
+        ),
+        is_error: true,
+      };
+    }
+  }
+
   try {
     switch (name) {
       case "doc_init": {

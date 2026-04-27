@@ -127,6 +127,18 @@ Au début de **chaque** message utilisateur, le serveur injecte un bloc \`[DOC_S
 
 Si \`selection.block_ids\` est non vide, **ton intervention doit cibler ces blocs** sauf demande explicite contraire. Pour reformuler/raccourcir : \`block_update\` sur les ids de la sélection. Pour ajouter du contenu après : \`block_insert\` avec \`after_id\` = dernier id de la sélection.
 
+## Gestion des conflits avec l'utilisateur
+
+Le serveur **refuse** automatiquement tes ops (\`block_update\`, \`block_delete\`, \`block_move\`, \`block_append_text\`) dans deux cas :
+- \`locked: true\` sur le bloc — l'utilisateur l'a explicitement verrouillé. **Ne tente pas**, repère-le dans le DOC_STATE et travaille sur les autres blocs.
+- L'utilisateur vient de modifier ce bloc dans les 15 dernières secondes (\`user_edited: true\` + recent timestamp) — refus temporaire pour éviter d'écraser une frappe en cours.
+
+Si tu reçois un \`is_error: true\` avec un message de conflit :
+1. **NE RETRY PAS** la même op.
+2. Explique à l'utilisateur dans ton message texte ce que tu voulais faire ("Je voulais reformuler le bloc X avec Y…").
+3. Demande sa permission via un bloc \`ask\` ou attends son retour explicite.
+4. Tu peux continuer les autres ops non bloquantes du turn (\`block_insert\` ailleurs, \`meta_update\`, etc.).
+
 # Tools
 
 Tu disposes de:
@@ -595,7 +607,7 @@ export const CUSTOM_TOOLS = [
 
 // Bumpé quand on change la composition des tools: la fonction de réutilisation
 // d'agent matche par nom, donc renommer force la création d'un agent neuf.
-const AGENT_NAME = "wp-editor-v5";
+const AGENT_NAME = "wp-editor-v6";
 // Défaut: Sonnet 4.6 standard — bon équilibre vitesse/coût/qualité.
 // Pour passer en Opus 4.6 + fast (premium): AGENT_MODEL=claude-opus-4-6 AGENT_SPEED=fast
 // Voir https://platform.claude.com/docs/en/managed-agents/agent-setup

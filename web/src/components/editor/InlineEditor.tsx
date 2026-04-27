@@ -19,6 +19,13 @@ interface Props {
   onMetaSnapshot: (meta: PostMeta) => void;
   onMetaPatch?: (patch: Partial<PostMeta>) => void;
   onOriginalSnapshot: (blocks: DraftBlock[] | null) => void;
+  /** Per-block metadata snapshot (locked, edit timestamps). */
+  onBlockMeta?: (
+    bm: Record<
+      string,
+      { locked?: boolean; user_edited_at?: number; agent_edited_at?: number }
+    >,
+  ) => void;
   onSelectionChange: (sel: Selection) => void;
   onReady: (handle: EditorHandle) => void;
 }
@@ -48,6 +55,7 @@ export function InlineEditor({
   onMetaSnapshot,
   onMetaPatch,
   onOriginalSnapshot,
+  onBlockMeta,
   onSelectionChange,
   onReady,
 }: Props) {
@@ -106,6 +114,7 @@ export function InlineEditor({
     onSnapshot: (snap) => {
       onMetaSnapshot(snap.meta);
       onOriginalSnapshot(snap.original ?? null);
+      if (snap.blockMeta) onBlockMeta?.(snap.blockMeta);
     },
     onDocLoad: (op) => {
       onMetaSnapshot(op.meta);

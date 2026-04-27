@@ -35,6 +35,24 @@
   }
 }
 
+/* User-locked blocks — agent ops are refused server-side. Visual cue:
+   amber outline + lock emoji in the gutter. */
+.bn-shell [data-locked="true"] > .bn-block-content {
+  position: relative;
+  outline: 1px solid rgba(245, 158, 11, 0.35);
+  outline-offset: 1px;
+  border-radius: 3px;
+}
+.bn-shell [data-locked="true"] > .bn-block-content::after {
+  content: "🔒";
+  position: absolute;
+  right: -22px;
+  top: 4px;
+  font-size: 12px;
+  opacity: 0.8;
+  pointer-events: none;
+}
+
 /* Highlight blocks the agent just touched. */
 .bn-shell [data-agent-edited="true"] > .bn-block-content {
   position: relative;

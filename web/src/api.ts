@@ -134,6 +134,28 @@ export async function flushBlocksToServer(sessionId: string, blocks: any[]) {
 }
 
 /**
+ * Hard-lock a block: agent ops on it are refused server-side until
+ * unlocked. The lock state is included in the next DOC_STATE so the
+ * agent doesn't even attempt.
+ */
+export async function setBlockLock(
+  sessionId: string,
+  blockId: string,
+  locked: boolean,
+) {
+  const res = await fetch(
+    `/api/sessions/${sessionId}/draft/blocks/${blockId}/lock`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ locked }),
+    },
+  );
+  if (!res.ok) throw new Error(`lock failed: ${await res.text()}`);
+  return res.json();
+}
+
+/**
  * Roll back the last completed agent turn. The server replaces the live
  * blocks with the pre-turn snapshot and emits a draft.snapshot so any
  * subscribed editor re-renders.

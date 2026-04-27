@@ -69,6 +69,15 @@ export const emptyMeta: PostMeta = {
 };
 
 export type DraftEvent =
-  | { type: "draft.snapshot"; blocks: DraftBlock[]; meta: PostMeta; original?: DraftBlock[] | null }
+  | {
+      type: "draft.snapshot";
+      blocks: DraftBlock[];
+      meta: PostMeta;
+      original?: DraftBlock[] | null;
+      blockMeta?: Record<
+        string,
+        { locked?: boolean; user_edited_at?: number; agent_edited_at?: number }
+      >;
+    }
   | { type: "draft.op"; op: BlockOp; touched_block_id?: string }
   | { type: "draft.error"; message: string };

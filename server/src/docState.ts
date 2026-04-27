@@ -26,11 +26,14 @@ interface CompactBlock {
   language?: string;
   user_edited?: boolean;
   agent_edited?: boolean;
+  locked?: boolean;
 }
 
 function compactBlock(
   b: DraftBlock,
-  meta: { user_edited_at?: number; agent_edited_at?: number } | undefined,
+  meta:
+    | { user_edited_at?: number; agent_edited_at?: number; locked?: boolean }
+    | undefined,
   userWindowMs: number,
   agentWindowMs: number,
 ): CompactBlock {
@@ -54,6 +57,7 @@ function compactBlock(
   if (meta?.agent_edited_at && now - meta.agent_edited_at < agentWindowMs) {
     out.agent_edited = true;
   }
+  if (meta?.locked) out.locked = true;
   return out;
 }
 
@@ -113,7 +117,7 @@ export function buildDocState(
 
   return [
     "[DOC_STATE]",
-    "L'état actuel de l'article dans l'éditeur Notion (source de vérité). Utilise les `id` pour cibler `block_update`/`block_delete`/`block_move`. `user_edited: true` = le user vient d'éditer ce bloc — sois prudent. `selection.block_ids` = ce que le user vise par « ce bloc ».",
+    "L'état actuel de l'article dans l'éditeur Notion (source de vérité). Utilise les `id` pour cibler `block_update`/`block_delete`/`block_move`. `user_edited: true` = le user vient d'éditer ce bloc — sois prudent (le serveur refusera tes ops pendant 15s). `locked: true` = bloc verrouillé par le user — toute op est refusée tant que le user ne déverrouille pas, ne tente même pas. `selection.block_ids` = ce que le user vise par « ce bloc ».",
     json,
     "[/DOC_STATE]",
   ].join("\n");

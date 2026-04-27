@@ -10,6 +10,7 @@ import {
   loadPostIntoDraft,
   sendMessage,
   undoAgent,
+  setBlockLock,
 } from "../../api";
 
 interface Props {
@@ -51,6 +52,7 @@ export function EditorPane({
   const [original, setOriginal] = useState<DraftBlock[] | null>(null);
   const [currentBlocks, setCurrentBlocks] = useState<DraftBlock[]>([]);
   const [selectionBlockIds, setSelectionBlockIds] = useState<string[]>([]);
+  const [lockedIds, setLockedIds] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [showMeta, setShowMeta] = useState(false);
 
@@ -85,6 +87,31 @@ export function EditorPane({
     (b: DraftBlock[] | null) => setOriginal(b),
     [],
   );
+  const onSnapshotBlockMeta = useCallback(
+    (bm: Record<string, { locked?: boolean }>) => {
+      const out = new Set<string>();
+      for (const [id, m] of Object.entries(bm || {})) {
+        if (m?.locked) out.add(id);
+      }
+      setLockedIds(out);
+    },
+    [],
+  );
+
+  // Apply data-locked attr on the editor blocks for the lock badge CSS.
+  useEffect(() => {
+    const root = document.querySelector(".bn-editor");
+    if (!root) return;
+    root
+      .querySelectorAll<HTMLElement>("[data-locked]")
+      .forEach((el) => el.removeAttribute("data-locked"));
+    for (const id of lockedIds) {
+      const el = root.querySelector<HTMLElement>(
+        `.bn-block-outer[data-id="${id}"]`,
+      );
+      if (el) el.setAttribute("data-locked", "true");
+    }
+  }, [lockedIds, currentBlocks]);
 
   function revertBlock(b: DraftBlock) {
     if (!editorHandle) return;
@@ -152,6 +179,29 @@ export function EditorPane({
       onToast("↶ Dernière intervention de l'agent annulée");
     } catch (err: any) {
       onToast(err.message || "Rien à annuler");
+    }
+  }
+
+  /** Toggle lock on the currently selected block(s). */
+  async function toggleLock() {
+    if (!sessionId || selectionBlockIds.length === 0) return;
+    const allLocked = selectionBlockIds.every((id) => lockedIds.has(id));
+    const next = !allLocked;
+    try {
+      await Promise.all(
+        selectionBlockIds.map((id) => setBlockLock(sessionId, id, next)),
+      );
+      setLockedIds((prev) => {
+        const out = new Set(prev);
+        for (const id of selectionBlockIds) {
+          if (next) out.add(id);
+          else out.delete(id);
+        }
+        return out;
+      });
+      onToast(next ? "🔒 Bloc(s) verrouillé(s)" : "🔓 Bloc(s) déverrouillé(s)");
+    } catch (err: any) {
+      onToast(`Erreur · ${err.message}`);
     }
   }
 
@@ -300,6 +350,19 @@ export function EditorPane({
             >
               🇬🇧 Anglais
             </button>
+            <button
+              onClick={toggleLock}
+              className="btn-ghost !py-0.5 !px-1.5"
+              title={
+                selectionBlockIds.every((id) => lockedIds.has(id))
+                  ? "Déverrouiller — l'agent peut à nouveau modifier"
+                  : "Verrouiller — l'agent ne pourra plus toucher à ce bloc"
+              }
+            >
+              {selectionBlockIds.every((id) => lockedIds.has(id))
+                ? "🔓 Déverrouiller"
+                : "🔒 Verrouiller"}
+            </button>
           </div>
         </div>
       )}
@@ -321,6 +384,7 @@ export function EditorPane({
           sessionId={sessionId}
           seedHtml={seedHtml}
           onMetaSnapshot={onSnapshotMeta}
+          onBlockMeta={onSnapshotBlockMeta}
           onMetaPatch={(patch) => {
             // The agent emitted a meta_update — merge into local meta state so
             // the auto-publish hook (keyed on meta.status) re-evaluates.

@@ -727,6 +727,21 @@ export function createApp(): Express {
     }
   });
 
+  /** Toggle the user-lock on a block. Locked blocks reject ALL agent ops. */
+  app.put("/api/sessions/:id/draft/blocks/:blockId/lock", async (req, res) => {
+    try {
+      const draft = await getDraftReady(req.params.id);
+      const locked = Boolean(req.body?.locked);
+      const ok = draft.setBlockLocked(req.params.blockId, locked);
+      if (!ok) return res.status(404).json({ error: "block not found" });
+      // Notify connected editors so the lock badge updates everywhere.
+      draft.emit(draft.snapshot());
+      res.json({ ok: true, locked });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   /** Undo the last completed agent turn (rolls blocks back to pre-state). */
   app.post("/api/sessions/:id/draft/undo", async (req, res) => {
     try {

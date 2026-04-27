@@ -21,6 +21,7 @@ interface MockState {
   messageCalls: Array<{ text: string; selection_block_ids: string[] }>;
   blockFlushCalls: Array<{ blocks: any[] }>;
   undoCalls: number;
+  lockCalls: Array<{ blockId: string; locked: boolean }>;
 }
 
 async function setupMocks(page: Page, state: MockState) {
@@ -68,6 +69,17 @@ async function setupMocks(page: Page, state: MockState) {
     if (/^\/api\/sessions\/[^/]+\/draft\/undo$/.test(path)) {
       state.undoCalls++;
       return json({ ok: true });
+    }
+    const lockMatch = path.match(
+      /^\/api\/sessions\/[^/]+\/draft\/blocks\/([^/]+)\/lock$/,
+    );
+    if (lockMatch) {
+      const body = JSON.parse(req.postData() || "{}");
+      state.lockCalls.push({
+        blockId: lockMatch[1],
+        locked: Boolean(body.locked),
+      });
+      return json({ ok: true, locked: body.locked });
     }
     return json({}, 200);
   });
@@ -122,7 +134,7 @@ test.describe("Sprint 3: ping-pong agent ↔ user", () => {
     // Critical correctness: when the agent inserts a block via SSE, we
     // must NOT flush those blocks back to /draft/blocks (the server would
     // mark them as user_edited in DOC_STATE, polluting agent context).
-    const state: MockState = { messageCalls: [], blockFlushCalls: [], undoCalls: 0 };
+    const state: MockState = { messageCalls: [], blockFlushCalls: [], undoCalls: 0, lockCalls: [] };
     await setupMocks(page, state);
     await page.goto("/");
     await expect(page.getByText(/Propose-moi 5 idées/).first()).toBeVisible({ timeout: 10_000 });
@@ -147,7 +159,7 @@ test.describe("Sprint 3: ping-pong agent ↔ user", () => {
   });
 
   test("quick action button sends sendMessage with selection.block_ids", async ({ page }) => {
-    const state: MockState = { messageCalls: [], blockFlushCalls: [], undoCalls: 0 };
+    const state: MockState = { messageCalls: [], blockFlushCalls: [], undoCalls: 0, lockCalls: [] };
     await setupMocks(page, state);
     await page.goto("/");
     await expect(page.getByText(/Propose-moi 5 idées/).first()).toBeVisible({ timeout: 10_000 });
@@ -175,7 +187,7 @@ test.describe("Sprint 3: ping-pong agent ↔ user", () => {
   });
 
   test("'Annuler agent' button calls /draft/undo", async ({ page }) => {
-    const state: MockState = { messageCalls: [], blockFlushCalls: [], undoCalls: 0 };
+    const state: MockState = { messageCalls: [], blockFlushCalls: [], undoCalls: 0, lockCalls: [] };
     await setupMocks(page, state);
     await page.goto("/");
     await expect(page.getByText(/Propose-moi 5 idées/).first()).toBeVisible({ timeout: 10_000 });
@@ -186,10 +198,34 @@ test.describe("Sprint 3: ping-pong agent ↔ user", () => {
     await expect.poll(() => state.undoCalls, { timeout: 3000 }).toBe(1);
   });
 
+  test("'🔒 Verrouiller' button calls /draft/blocks/:id/lock with locked=true", async ({
+    page,
+  }) => {
+    const state: MockState = { messageCalls: [], blockFlushCalls: [], undoCalls: 0, lockCalls: [] };
+    await setupMocks(page, state);
+    await page.goto("/");
+    await expect(page.getByText(/Propose-moi 5 idées/).first()).toBeVisible({ timeout: 10_000 });
+    await page.getByRole("button", { name: /Ouvrir l'éditeur de blocs/ }).click();
+    await expect(page.locator(".bn-editor")).toBeVisible();
+
+    // Seed a block + select it
+    await pushDraftOp(page, {
+      op: "block_insert",
+      after_id: null,
+      block: { id: "lockme", type: "paragraph", content: "Précieux" },
+    });
+    await page.locator('.bn-block[data-id="lockme"]').click();
+
+    // Click the "Verrouiller" button in the quick actions bar
+    await page.getByRole("button", { name: /🔒 Verrouiller/ }).click();
+    await expect.poll(() => state.lockCalls.length, { timeout: 3000 }).toBe(1);
+    expect(state.lockCalls[0]).toEqual({ blockId: "lockme", locked: true });
+  });
+
   test("normal chat input also passes selection.block_ids in sendMessage", async ({
     page,
   }) => {
-    const state: MockState = { messageCalls: [], blockFlushCalls: [], undoCalls: 0 };
+    const state: MockState = { messageCalls: [], blockFlushCalls: [], undoCalls: 0, lockCalls: [] };
     await setupMocks(page, state);
     await page.goto("/");
     await expect(page.getByText(/Propose-moi 5 idées/).first()).toBeVisible({ timeout: 10_000 });
