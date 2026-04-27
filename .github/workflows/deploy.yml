@@ -89,6 +89,11 @@ jobs:
           printf 'VPS_IP=%s\n' "$VPS_IP" >> .env
           printf 'AUTH_USER=%s\n' "$(echo "$B64_AUTH_USER" | base64 -d)" >> .env
           printf 'AUTH_PASS=%s\n' "$(echo "$B64_AUTH_PASS" | base64 -d)" >> .env
+          # Volume persistant pour les drafts du block editor — survit aux
+          # redéploiements. Doit exister avant `up -d` car le bind mount
+          # serait créé avec mode 755 sinon. Idempotent.
+          mkdir -p /opt/managed-agents/data/drafts
+          chmod 700 /opt/managed-agents/data
           docker compose -f docker-compose.local.yml --env-file .env up -d --build
           # Restart Traefik pour qu'il sorte d'un éventuel panic loop sur du
           # vieux config (notre middleware basicauth précédent l'a fait crasher).

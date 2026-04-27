@@ -16,7 +16,7 @@ import {
   type WpPostInput,
 } from "./wordpress.js";
 import { dispatchBlockTool } from "./agentBlockTools.js";
-import { getDraft } from "./draftStore.js";
+import { getDraft, getDraftReady } from "./draftStore.js";
 import { blocksToHtml, htmlToBlocks } from "./htmlBlocks.js";
 import type { PostMeta } from "./contract.js";
 
@@ -653,14 +653,17 @@ export function createApp(): Express {
   // Dedicated SSE channel for the editor: draft.snapshot + draft.op events
   // forwarded from the in-memory projection mutated by the block_* tools.
 
-  app.get("/api/sessions/:id/draft/stream", (req, res) => {
+  app.get("/api/sessions/:id/draft/stream", async (req, res) => {
     const { id } = req.params;
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders?.();
-    const draft = getDraft(id);
+    // Wait for disk hydration so the first snapshot reflects persisted state
+    // (otherwise after a server restart the editor would briefly see empty
+    // blocks before a real op refreshes it).
+    const draft = await getDraftReady(id);
     res.write(`data: ${JSON.stringify(draft.snapshot())}\n\n`);
     draft.listeners.add(res);
     const heartbeat = setInterval(() => {
@@ -674,8 +677,8 @@ export function createApp(): Express {
     });
   });
 
-  app.get("/api/sessions/:id/draft", (req, res) => {
-    const draft = getDraft(req.params.id);
+  app.get("/api/sessions/:id/draft", async (req, res) => {
+    const draft = await getDraftReady(req.params.id);
     res.json({
       blocks: draft.state.blocks,
       meta: draft.state.meta,
@@ -683,21 +686,17 @@ export function createApp(): Express {
     });
   });
 
-  app.put("/api/sessions/:id/draft/meta", (req, res) => {
-    const draft = getDraft(req.params.id);
+  app.put("/api/sessions/:id/draft/meta", async (req, res) => {
+    const draft = await getDraftReady(req.params.id);
     const patch = req.body as Partial<PostMeta>;
-    draft.state.meta = {
-      ...draft.state.meta,
-      ...patch,
-      seo: { ...draft.state.meta.seo, ...(patch.seo || {}) },
-    };
+    draft.apply({ op: "meta_update", meta: patch });
     draft.emit({ type: "draft.op", op: { op: "meta_update", meta: patch } });
     res.json(draft.state.meta);
   });
 
   app.post("/api/sessions/:id/draft/load", writeLimit, async (req, res) => {
     try {
-      const draft = getDraft(req.params.id);
+      const draft = await getDraftReady(req.params.id);
       const postId = Number(req.body?.id);
       if (!postId) return res.status(400).json({ error: "id required" });
       const post = (await getPost(postId)) as any;
@@ -724,6 +723,7 @@ export function createApp(): Express {
       };
       draft.apply({ op: "doc_load", blocks, post_id: post.id, meta });
       draft.emit(draft.snapshot());
+      await draft.flush();
       res.json({ ok: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -735,7 +735,7 @@ export function createApp(): Express {
   // and tag resolution.
   app.post("/api/sessions/:id/draft/publish", writeLimit, async (req, res) => {
     try {
-      const draft = getDraft(req.params.id);
+      const draft = await getDraftReady(req.params.id);
       const meta = draft.state.meta;
       const html = blocksToHtml(draft.state.blocks);
       const status = (req.body?.status as string) || meta.status || "draft";
@@ -757,6 +757,7 @@ export function createApp(): Express {
       };
       draft.state.original = JSON.parse(JSON.stringify(draft.state.blocks));
       draft.emit(draft.snapshot());
+      await draft.flush();
       res.json(result);
     } catch (err: any) {
       console.error("[draft] publish error:", err);

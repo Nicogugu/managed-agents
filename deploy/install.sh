@@ -36,6 +36,13 @@ fi
 
 cd "$DEST/deploy"
 
+# Volume persistant pour les drafts du block editor. Conserve les
+# brouillons en cours quand on redéploie (perdus auparavant à chaque
+# `docker compose up -d --build`).
+echo "→ Préparation du volume /opt/managed-agents/data"
+mkdir -p /opt/managed-agents/data/drafts
+chmod 700 /opt/managed-agents/data
+
 echo "→ Écriture du .env"
 cat > .env <<EOF
 ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
