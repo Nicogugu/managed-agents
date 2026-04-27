@@ -194,6 +194,12 @@ export function App() {
             setAskAnswered({});
             handledDrafts.current = new Set();
             setPublishedDrafts({});
+            // Reset editor-related state so the new session truly starts
+            // empty even on the right-pane.
+            setEditorOpen(false);
+            setEditorSeed(null);
+            editorSelectionIds.current = [];
+            draftAuto.reset();
             void newSession();
           }
         }}

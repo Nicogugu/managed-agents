@@ -213,11 +213,23 @@ export function useAgentBlockOps({
           return;
         }
         if (data.type === "draft.snapshot") {
-          if (data.blocks.length) {
+          // Always replace — even on an empty snapshot, because that means
+          // we just connected to a fresh session whose projection is empty.
+          // Without this, switching sessions kept the previous session's
+          // blocks visible in the editor (the snapshot.blocks.length === 0
+          // path used to be a no-op).
+          agentOpFlag.applying = true;
+          try {
             editor.replaceBlocks(
               editor.document.map((b: any) => b.id),
-              data.blocks.map(draftToBN),
+              data.blocks.length
+                ? data.blocks.map(draftToBN)
+                : [{ type: "paragraph", content: "" } as any],
             );
+          } finally {
+            queueMicrotask(() => {
+              agentOpFlag.applying = false;
+            });
           }
           cbsRef.current.onSnapshot(data);
         } else if (data.type === "draft.op") {

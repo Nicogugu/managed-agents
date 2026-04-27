@@ -46,6 +46,11 @@ export function useSession() {
   // status_idle est différé tant que le typewriter n'a pas vidé sa queue,
   // sinon la ligne d'activité disparaît avant que tout le texte soit révélé.
   const pendingIdle = useRef(false);
+  // Flips to true when a new session starts. The currently-running typewriter
+  // tick checks this on each iteration and bails out — without this, ticks
+  // from the previous session keep appending characters to setMessages
+  // *after* setMessages([]), so old text re-appears in the new chat.
+  const typewriterAborted = useRef(false);
 
   function connect(id: string) {
     esRef.current?.close();
@@ -240,6 +245,10 @@ export function useSession() {
       }
       return;
     }
+    // A new reveal is starting — clear any previous abort flag so this one
+    // proceeds normally. (The flag is set by newSession() to kill ticks
+    // belonging to the previous session.)
+    typewriterAborted.current = false;
     const totalDurationMs = Math.min(2000, Math.max(400, next.length * 0.7));
     const TICK_MS = 30;
     const ticks = Math.max(1, Math.floor(totalDurationMs / TICK_MS));
@@ -261,7 +270,7 @@ export function useSession() {
       }
     };
     const tick = () => {
-      if (cancelled) return;
+      if (cancelled || typewriterAborted.current) return;
       const end = Math.min(pos + charsPerTick, next.length);
       appendAssistantText(next.slice(pos, end));
       pos = end;
@@ -349,8 +358,13 @@ export function useSession() {
 
   async function newSession() {
     esRef.current?.close();
+    // Abort any in-flight typewriter tick from the previous session — without
+    // this, a tick scheduled before setMessages([]) keeps appending old text
+    // to a fresh assistant message in the new (supposed-to-be-empty) chat.
+    typewriterAborted.current = true;
     typewriterQueue.current = [];
     typewriterRunning.current = false;
+    typewriterFlushNow.current = null;
     pendingIdle.current = false;
     lastEventIdRef.current = 0;
     currentAssistantId.current = null;
