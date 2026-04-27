@@ -22,7 +22,8 @@ export type BlockType =
   | "code" // props.language
   | "image" // props.url, props.alt, props.caption
   | "table"
-  | "raw_html"; // fallback for shortcodes / Gutenberg blocks we cannot parse
+  | "raw_html" // fallback for shortcodes / Gutenberg blocks we cannot parse
+  | "client_block"; // typed Gutenberg custom block (Superprof + future clients)
 
 export type BlockProps = Record<string, unknown>;
 

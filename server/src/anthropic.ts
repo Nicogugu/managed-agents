@@ -299,33 +299,35 @@ block_update({ id: "<block_id>", text: "nouveau contenu" })
 - \`status\` par défaut = \`draft\`. Mets \`publish\` (via \`meta_update\`) seulement si l'utilisateur dit explicitement "publie".
 - Pour update : appelle \`wp_load_post\` avant de \`block_update\`. NE RÉÉMETS JAMAIS le doc complet via \`doc_init\` (qui efface l'historique).
 
-# Blocs custom (Gutenberg)
+# Blocs custom (Gutenberg) — \`client_block_insert\`
 
-Le site WP cible peut avoir des blocs custom (plugin maison) avec leur propre namespace, ex \`superprof/*\`. Tu n'as pas de tool dédié pour ces blocs — tu les insères en \`raw_html\` en respectant **EXACTEMENT** le format Gutenberg attendu (commentaire d'attribut + DOM serializé). Le bloc doit être encadré par \`<!-- wp:namespace/name {attrs} -->\` et \`<!-- /wp:namespace/name -->\`.
+Le site WP cible peut avoir des blocs custom (plugin maison, ex Superprof). Le DOC_STATE injecté à chaque tour contient \`client_block_schemas\` : la liste des namespaces disponibles avec leurs attrs et children attendus.
 
-## Catalogue Superprof
+**N'utilise PAS \`raw_html\`** pour ces blocs. Utilise \`client_block_insert\` :
 
-### Citation (\`superprof/quote-block\`)
 \`\`\`
-block_insert({ block: { type: "raw_html", raw: '<!-- wp:superprof/quote-block {"quote":"Texte de la citation","citation":"Auteur, Source"} -->\\n<blockquote class="wp-block-superprof-quote-block"><p>Texte de la citation</p><cite>Auteur, Source</cite></blockquote>\\n<!-- /wp:superprof/quote-block -->' } })
+client_block_insert({
+  namespace: "superprof/quote-block",
+  attrs: { quote: "Texte de la citation", citation: "Auteur, Source" }
+})
 \`\`\`
 
-### Sondage (\`superprof/polls-block\`)
+Pour les blocs avec children (poll, timeline) :
 \`\`\`
-block_insert({ block: { type: "raw_html", raw: '<!-- wp:superprof/polls-block {"pollId":"<UUID>","pollQuestion":"Question ?"} -->\\n<div data-poll-id="<UUID>" class="wp-block-superprof-polls-block"><!-- wp:poll/poll-item {"choiceId":"<UUID-1>","choiceIndex":0,"choiceText":"Option 1"} /-->\\n\\n<!-- wp:poll/poll-item {"choiceId":"<UUID-2>","choiceIndex":1,"choiceText":"Option 2"} /--></div>\\n<!-- /wp:superprof/polls-block -->' } })
+client_block_insert({
+  namespace: "superprof/polls-block",
+  attrs: { pollQuestion: "Quel est votre signe ?" },
+  children: [
+    { attrs: { choiceText: "Rat 🐀" } },
+    { attrs: { choiceText: "Boeuf 🐂" } },
+    { attrs: { choiceText: "Tigre 🐅" } }
+  ]
+})
 \`\`\`
-Génère un UUID v4 par sondage et par item (\`crypto.randomUUID\` côté agent via bash si nécessaire). \`choiceIndex\` est l'index 0-based.
 
-### Timeline (\`superprof/timeline-block\`)
-\`\`\`
-block_insert({ block: { type: "raw_html", raw: '<!-- wp:superprof/timeline-block -->\\n<div class="wp-block-superprof-timeline-block timeline medium"><!-- wp:timeline/timeline-container {"itemDate":"Date 1","itemTitle":"Titre 1"} -->\\n<div class="wp-block-timeline-timeline-container timeline-row"><div class="timeline-dot" style="background-color:#ff6363"></div><div class="timeline-date"><p class="timeline-date-item" style="color:#ff6363;font-size:18px;text-align:left">Date 1</p></div><div class="timeline-details"><p class="timeline-title" style="color:#888888;font-size:18px">Titre 1</p><p class="timeline-description" style="color:#888888;font-size:16px"></p></div></div>\\n<!-- /wp:timeline/timeline-container -->\\n<!-- wp:timeline/timeline-container {"itemDate":"Date 2","itemTitle":"Titre 2","isLast":true} -->\\n<div class="wp-block-timeline-timeline-container timeline-row last"><div class="timeline-dot" style="background-color:#ff6363"></div><div class="timeline-date"><p class="timeline-date-item" style="color:#ff6363;font-size:18px;text-align:left">Date 2</p></div><div class="timeline-details"><p class="timeline-title" style="color:#888888;font-size:18px">Titre 2</p></div></div>\\n<!-- /wp:timeline/timeline-container --></div>\\n<!-- /wp:superprof/timeline-block -->' } })
-\`\`\`
-Le dernier \`timeline-container\` doit avoir \`isLast: true\` ET la classe \`last\` sur le \`<div>\` parent. Couleur dot par défaut \`#ff6363\`.
+Les ids/UUID/index sont auto-générés côté serveur — ne les passe pas, sauf si tu mets à jour un bloc existant. Pour modifier les attrs ou la liste des children d'un bloc déjà inséré : \`client_block_update({ id, attrs?, children? })\`.
 
-**Règles** :
-- Respecte les attributs JSON dans les commentaires \`<!-- wp:... {…} -->\` AU CARACTÈRE PRÈS — le validator Gutenberg côté WP rejette le bloc sinon.
-- Les sauts de ligne dans le HTML sont \`\\n\` (significatifs pour Gutenberg).
-- Pour les autres blocs custom dont tu n'as pas le format, demande à l'utilisateur (\`ask\`) de coller un exemple HTML valide.
+L'éditeur rend ces blocs joliment et l'utilisateur peut éditer les champs via un formulaire — beaucoup mieux qu'un \`raw_html\` opaque.
 
 # Discipline de fin de tour
 
@@ -597,6 +599,50 @@ export const CUSTOM_TOOLS = [
   },
   {
     type: "custom" as const,
+    name: "client_block_insert",
+    description:
+      "Insère un bloc Gutenberg custom du plugin client (ex: Superprof). " +
+      "Le bloc est rendu joliment dans l'éditeur et l'utilisateur peut éditer " +
+      "ses champs via un formulaire. namespace = ex \"superprof/quote-block\". " +
+      "attrs = paire clé/valeur des attributs du bloc (cf. DOC_STATE.client_block_schemas " +
+      "pour la liste exacte des attrs requis). children = tableau d'items pour les " +
+      "blocs avec sous-éléments (poll, timeline). Les ids/uuid sont auto-générés.",
+    input_schema: {
+      type: "object",
+      properties: {
+        namespace: { type: "string" },
+        after_id: { type: "string" },
+        attrs: { type: "object" },
+        children: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { attrs: { type: "object" } },
+            required: ["attrs"],
+          },
+        },
+      },
+      required: ["namespace", "attrs"],
+    },
+  },
+  {
+    type: "custom" as const,
+    name: "client_block_update",
+    description:
+      "Met à jour les attrs ou les children d'un client_block existant par id. " +
+      "Les attrs et children passés écrasent ceux d'origine (deep merge sur attrs).",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        attrs: { type: "object" },
+        children: { type: "array", items: { type: "object" } },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    type: "custom" as const,
     name: "wp_search_posts",
     description: "Recherche des articles WP existants par titre/slug.",
     input_schema: {
@@ -626,7 +672,7 @@ export const CUSTOM_TOOLS = [
 
 // Bumpé quand on change la composition des tools: la fonction de réutilisation
 // d'agent matche par nom, donc renommer force la création d'un agent neuf.
-const AGENT_NAME = "wp-editor-v8";
+const AGENT_NAME = "wp-editor-v9";
 // Défaut: Sonnet 4.6 standard — bon équilibre vitesse/coût/qualité.
 // Pour passer en Opus 4.6 + fast (premium): AGENT_MODEL=claude-opus-4-6 AGENT_SPEED=fast
 // Voir https://platform.claude.com/docs/en/managed-agents/agent-setup

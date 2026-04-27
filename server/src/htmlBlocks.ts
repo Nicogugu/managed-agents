@@ -13,6 +13,11 @@
 
 import type { DraftBlock, BlockType } from "./contract.js";
 import { randomUUID } from "node:crypto";
+import {
+  parseGutenbergBlock,
+  serializeGutenbergBlock,
+} from "./gutenberg.js";
+import type { ClientBlockInstance } from "./customBlockSchema.js";
 
 const BLOCK_TAGS = new Set([
   "p",
@@ -141,6 +146,36 @@ function uid(): string {
 }
 
 export function htmlToBlocks(html: string): DraftBlock[] {
+  if (!html || !html.trim()) return [];
+
+  // First pass: peel off any registered Gutenberg custom block ranges as
+  // typed `client_block` DraftBlocks. The remaining HTML between/around
+  // them is parsed by the generic tokenizer below. This preserves the
+  // structure for Superprof + future client plugins through a full
+  // load/edit/save round-trip without lossy reformatting.
+  const out: DraftBlock[] = [];
+  let cursor = 0;
+  while (cursor < html.length) {
+    const found = parseGutenbergBlock(html, cursor);
+    if (!found) {
+      const tail = html.slice(cursor);
+      out.push(...htmlToBlocksRaw(tail));
+      break;
+    }
+    if (found.start > cursor) {
+      out.push(...htmlToBlocksRaw(html.slice(cursor, found.start)));
+    }
+    out.push({
+      id: uid(),
+      type: "client_block",
+      props: { instance: found.instance as ClientBlockInstance },
+    } as DraftBlock);
+    cursor = found.end;
+  }
+  return out;
+}
+
+function htmlToBlocksRaw(html: string): DraftBlock[] {
   if (!html || !html.trim()) return [];
   const tokens = tokenize(html);
   const blocks: DraftBlock[] = [];
@@ -322,6 +357,9 @@ export function blocksToHtml(blocks: DraftBlock[]): string {
       out += caption
         ? `<figure>${img}<figcaption>${escapeHtml(caption)}</figcaption></figure>`
         : img;
+    } else if (b.type === "client_block") {
+      const inst = (b.props as any)?.instance as ClientBlockInstance | undefined;
+      if (inst?.namespace) out += serializeGutenbergBlock(inst);
     } else if (b.type === "raw_html") {
       out += String(b.props?.html ?? "");
     } else if (b.type === "table") {

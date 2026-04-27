@@ -1,4 +1,6 @@
 import type { DraftBlock, PostMeta } from "./contract.js";
+import { customBlockRegistry } from "./customBlocks/registry.js";
+import type { ClientBlockInstance } from "./customBlockSchema.js";
 
 /**
  * Builds a compact text representation of the current draft for injection
@@ -24,6 +26,10 @@ interface CompactBlock {
   raw?: string;
   level?: number;
   language?: string;
+  /** For client_block: namespace + attrs + (optional) children */
+  namespace?: string;
+  attrs?: Record<string, any>;
+  children?: Array<{ attrs: Record<string, any> }>;
   user_edited?: boolean;
   agent_edited?: boolean;
   locked?: boolean;
@@ -42,6 +48,13 @@ function compactBlock(
   const txt = typeof b.content === "string" ? b.content : extractText(b.content);
   if (b.type === "code" || b.type === "raw_html") {
     out.raw = String((b.props as any)?.raw ?? (b.props as any)?.html ?? txt);
+  } else if (b.type === "client_block") {
+    const inst = (b.props as any)?.instance as ClientBlockInstance | undefined;
+    if (inst) {
+      out.namespace = inst.namespace;
+      out.attrs = inst.attrs;
+      if (inst.children) out.children = inst.children;
+    }
   } else if (txt) {
     out.text = txt;
   }
@@ -87,6 +100,32 @@ export function buildDocState(
   );
 
   // Truncate text fields if needed (keep type + id + flags always)
+  // Compact schema list for client blocks — gives the agent the exact attrs
+  // it needs to provide when calling client_block_insert. Only includes
+  // namespace + attrs + children spec (no UI metadata).
+  const clientBlockSchemas = customBlockRegistry.map((s) => ({
+    namespace: s.namespace,
+    attrs: s.attrs.map((a) => ({
+      name: a.name,
+      type: a.type,
+      required: a.required || undefined,
+      autogen: a.autogen || undefined,
+      label: a.label || undefined,
+    })),
+    children: s.children
+      ? {
+          itemNamespace: s.children.itemNamespace,
+          attrs: s.children.attrs.map((a) => ({
+            name: a.name,
+            type: a.type,
+            required: a.required || undefined,
+            autogen: a.autogen || undefined,
+            label: a.label || undefined,
+          })),
+        }
+      : undefined,
+  }));
+
   const payload = {
     meta: {
       title: meta.title || "",
@@ -103,6 +142,7 @@ export function buildDocState(
     selection: {
       block_ids: opts.selectionBlockIds || [],
     },
+    client_block_schemas: clientBlockSchemas,
   };
 
   let json = JSON.stringify(payload, null, 2);
@@ -117,7 +157,7 @@ export function buildDocState(
 
   return [
     "[DOC_STATE]",
-    "L'état actuel de l'article dans l'éditeur Notion (source de vérité). Utilise les `id` pour cibler `block_update`/`block_delete`/`block_move`. `user_edited: true` = le user vient d'éditer ce bloc — sois prudent (le serveur refusera tes ops pendant 15s). `locked: true` = bloc verrouillé par le user — toute op est refusée tant que le user ne déverrouille pas, ne tente même pas. `selection.block_ids` = ce que le user vise par « ce bloc ».",
+    "L'état actuel de l'article dans l'éditeur Notion (source de vérité). Utilise les `id` pour cibler `block_update`/`block_delete`/`block_move`. `user_edited: true` = le user vient d'éditer ce bloc — sois prudent (le serveur refusera tes ops pendant 15s). `locked: true` = bloc verrouillé par le user — toute op est refusée tant que le user ne déverrouille pas, ne tente même pas. `selection.block_ids` = ce que le user vise par « ce bloc ». `client_block_schemas` = schémas des blocs custom du plugin client (Superprof, etc.) que tu peux insérer via `client_block_insert({namespace, attrs, children?})`. Les blocs `type: \"client_block\"` exposent `namespace` + `attrs` + `children` au lieu de `text`.",
     json,
     "[/DOC_STATE]",
   ].join("\n");

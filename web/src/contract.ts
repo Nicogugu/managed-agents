@@ -13,7 +13,8 @@ export type BlockType =
   | "code"
   | "image"
   | "table"
-  | "raw_html";
+  | "raw_html"
+  | "client_block";
 
 export type BlockProps = Record<string, unknown>;
 

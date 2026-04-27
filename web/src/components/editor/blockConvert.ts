@@ -56,6 +56,12 @@ export function draftToBN(b: DraftBlock): any {
       return { id, type: "table", content: b.content as any };
     case "raw_html":
       return { id, type: "rawHtml", props: { html: String(props.html || "") } };
+    case "client_block":
+      return {
+        id,
+        type: "clientBlock",
+        props: { instance: JSON.stringify(props.instance || {}) },
+      };
   }
 }
 
@@ -107,6 +113,17 @@ export function bnToDraft(b: any): DraftBlock {
       return { id, type: "table", content: b.content };
     case "rawHtml":
       return { id, type: "raw_html", props: { html: String(b.props?.html || "") } };
+    case "clientBlock": {
+      let instance: any = {};
+      try {
+        instance = JSON.parse(b.props?.instance || "{}");
+      } catch {}
+      return {
+        id,
+        type: "client_block",
+        props: { instance },
+      };
+    }
     default:
       // Unknown block type: serialize as raw_html with HTML rendering of inline content
       return { id, type: "paragraph", content: extractText(b.content) };

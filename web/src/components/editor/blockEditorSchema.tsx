@@ -1,6 +1,7 @@
 import { BlockNoteSchema, defaultBlockSpecs } from "@blocknote/core";
 import { createReactBlockSpec } from "@blocknote/react";
 import { useState } from "react";
+import { clientBlockBlockSpec } from "./clientBlockSpec";
 
 /**
  * `rawHtml` block: fallback for content the server couldn't parse into a
@@ -77,5 +78,6 @@ export const editorSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
     rawHtml: RawHtmlBlock(),
+    clientBlock: clientBlockBlockSpec(),
   },
 });

@@ -1,4 +1,8 @@
-import { useCreateBlockNote } from "@blocknote/react";
+import {
+  useCreateBlockNote,
+  SuggestionMenuController,
+  getDefaultReactSlashMenuItems,
+} from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
 import { useEffect, useMemo, useRef, useState } from "react";
 import "@blocknote/core/fonts/inter.css";
@@ -8,7 +12,58 @@ import "./editor.css";
 import { editorSchema } from "./blockEditorSchema";
 import { useAgentBlockOps, agentOpFlag } from "./useAgentBlockOps";
 import { bnToDraft, draftToBN } from "./blockConvert";
+import { customBlockDescriptors } from "../../customBlocks/registry";
+import type { ClientBlockDescriptor } from "../../customBlocks/types";
 import type { DraftBlock, PostMeta } from "../../contract";
+
+/** Builds a slash-menu entry that inserts a fresh client block instance. */
+function clientBlockSlashItem(editor: any, d: ClientBlockDescriptor) {
+  return {
+    title: d.label,
+    subtext: d.namespace,
+    aliases: [d.namespace, d.group || ""],
+    group: d.group || "Custom",
+    icon: <span style={{ fontSize: 16 }}>{d.icon}</span>,
+    onItemClick: () => {
+      const attrs: Record<string, any> = {};
+      for (const a of d.attrs) {
+        if (a.autogen === "uuid")
+          attrs[a.name] =
+            typeof crypto !== "undefined" && "randomUUID" in crypto
+              ? crypto.randomUUID()
+              : Math.random().toString(36).slice(2);
+        else if (a.default !== undefined) attrs[a.name] = a.default;
+      }
+      const children = d.children
+        ? Array.from({ length: Math.max(2, d.children.min ?? 2) }).map(
+            (_, i) => {
+              const cattrs: Record<string, any> = {};
+              for (const a of d.children!.attrs) {
+                if (a.autogen === "uuid")
+                  cattrs[a.name] =
+                    typeof crypto !== "undefined" && "randomUUID" in crypto
+                      ? crypto.randomUUID()
+                      : Math.random().toString(36).slice(2);
+                else if (a.autogen === "index")
+                  cattrs[a.name] = a.type === "boolean" ? false : i;
+                else if (a.default !== undefined) cattrs[a.name] = a.default;
+              }
+              return { attrs: cattrs };
+            },
+          )
+        : undefined;
+      const instance = { namespace: d.namespace, attrs, children };
+      const cur = editor.getTextCursorPosition?.();
+      const refId = cur?.block?.id;
+      const partial: any = {
+        type: "clientBlock",
+        props: { instance: JSON.stringify(instance) },
+      };
+      if (refId) editor.insertBlocks([partial], refId, "after");
+      else editor.insertBlocks([partial], editor.document.at(-1)?.id, "after");
+    },
+  };
+}
 
 type Selection = { block_ids: string[] } | null;
 
@@ -232,7 +287,25 @@ export function InlineEditor({
 
   return (
     <div className="bn-shell">
-      <BlockNoteView editor={editor} theme="dark" />
+      <BlockNoteView editor={editor} theme="dark" slashMenu={false}>
+        <SuggestionMenuController
+          triggerCharacter="/"
+          getItems={async (query) => {
+            const defaults = getDefaultReactSlashMenuItems(editor);
+            const customItems = customBlockDescriptors.map((d) =>
+              clientBlockSlashItem(editor, d),
+            );
+            const all = [...defaults, ...customItems];
+            const q = (query || "").toLowerCase().trim();
+            if (!q) return all;
+            return all.filter((it: any) =>
+              [it.title, ...(it.aliases || [])]
+                .filter(Boolean)
+                .some((s: string) => s.toLowerCase().includes(q)),
+            );
+          }}
+        />
+      </BlockNoteView>
     </div>
   );
 }

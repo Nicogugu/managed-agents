@@ -9,6 +9,9 @@ import {
   listTags,
   listMedia,
 } from "./wordpress.js";
+import { getSchema } from "./customBlocks/registry.js";
+import { generateAttrs } from "./gutenberg.js";
+import type { ClientBlockChild, ClientBlockInstance } from "./customBlockSchema.js";
 
 /**
  * Dispatcher for the block_* (and a few wp_* read helpers) custom tools used
@@ -51,6 +54,8 @@ export const BLOCK_TOOL_NAMES = new Set([
   "wp_list_categories",
   "wp_list_tags",
   "wp_list_media",
+  "client_block_insert",
+  "client_block_update",
 ]);
 
 export async function dispatchBlockTool(
@@ -140,6 +145,62 @@ export async function dispatchBlockTool(
         });
         if (!r.ok) return { content: diag(r.error!), is_error: true };
         return { content: diag(`moved ${input.id}`) };
+      }
+      case "client_block_insert": {
+        const ns = String(input.namespace || "");
+        const schema = getSchema(ns);
+        if (!schema)
+          return {
+            content: diag(`unknown client block namespace: ${ns}`),
+            is_error: true,
+          };
+        const attrs = { ...generateAttrs(schema.attrs), ...(input.attrs || {}) };
+        let children: ClientBlockChild[] | undefined;
+        if (schema.children) {
+          children = ((input.children as any[]) || []).map((c, i) => ({
+            attrs: {
+              ...generateAttrs(schema.children!.attrs, i),
+              ...(c?.attrs || {}),
+            },
+          }));
+        }
+        const instance: ClientBlockInstance = { namespace: ns, attrs, children };
+        const block: DraftBlock = {
+          id: input.id || randomUUID(),
+          type: "client_block",
+          props: { instance },
+        };
+        emit({
+          op: "block_insert",
+          after_id: input.after_id || null,
+          block,
+        });
+        return { content: diag(`inserted client_block ${ns} id=${block.id}`) };
+      }
+      case "client_block_update": {
+        const id = input.id;
+        const cur = draft.state.blocks.find((b) => b.id === id);
+        if (!cur || cur.type !== "client_block")
+          return {
+            content: diag(`unknown client_block id ${id}`),
+            is_error: true,
+          };
+        const oldInstance = (cur.props as any)?.instance as ClientBlockInstance;
+        const newInstance: ClientBlockInstance = {
+          namespace: oldInstance.namespace,
+          attrs: { ...oldInstance.attrs, ...(input.attrs || {}) },
+          children:
+            input.children !== undefined
+              ? (input.children as ClientBlockChild[])
+              : oldInstance.children,
+        };
+        const r = emit({
+          op: "block_update",
+          id,
+          patch: { props: { instance: newInstance } },
+        });
+        if (!r.ok) return { content: diag(r.error!), is_error: true };
+        return { content: diag(`updated client_block ${id}`) };
       }
       case "meta_update": {
         const meta: Partial<PostMeta> = {};
