@@ -47,6 +47,16 @@ export function useAgentBlockOps({
   const reconnectTimer = useRef<number | null>(null);
   const attempts = useRef(0);
 
+  // Stabilize callbacks via refs so the useEffect that opens the SSE doesn't
+  // close/reopen the connection on every parent re-render (callbacks are
+  // typically passed inline = fresh reference each render). Without this,
+  // a long agent stream that triggers many editor re-renders ends up
+  // closing the SSE between each render and missing ops in the gap.
+  const cbsRef = useRef({ onSnapshot, onDocLoad, onMetaUpdate, onAgentTouch });
+  useEffect(() => {
+    cbsRef.current = { onSnapshot, onDocLoad, onMetaUpdate, onAgentTouch };
+  }, [onSnapshot, onDocLoad, onMetaUpdate, onAgentTouch]);
+
   useEffect(() => {
     if (!editor || !sessionId) return;
 
@@ -65,7 +75,7 @@ export function useAgentBlockOps({
             ? extractText(block.content)
             : "";
         editor.updateBlock(id, { content: cur + delta } as any);
-        onAgentTouch(id);
+        cbsRef.current.onAgentTouch(id);
       }
       } finally {
         queueMicrotask(() => {
@@ -119,7 +129,7 @@ export function useAgentBlockOps({
         case "doc_load": {
           const blocks = op.blocks.map(draftToBN);
           editor.replaceBlocks(editor.document.map((b: any) => b.id), blocks);
-          if (op.op === "doc_load") onDocLoad?.(op);
+          if (op.op === "doc_load") cbsRef.current.onDocLoad?.(op);
           ensureTrailingParagraph();
           break;
         }
@@ -134,7 +144,7 @@ export function useAgentBlockOps({
           } else {
             editor.insertBlocks([block], editor.document[0].id, "before");
           }
-          if (touchedId || op.block.id) onAgentTouch(touchedId || op.block.id);
+          if (touchedId || op.block.id) cbsRef.current.onAgentTouch(touchedId || op.block.id);
           ensureTrailingParagraph();
           break;
         }
@@ -145,7 +155,7 @@ export function useAgentBlockOps({
           // Convert patch to BN partial via a synthesised DraftBlock
           const merged = { id, type: op.patch.type || draftTypeFromBN(block.type), ...op.patch };
           editor.updateBlock(id, draftToBN(merged as any) as any);
-          onAgentTouch(id);
+          cbsRef.current.onAgentTouch(id);
           break;
         }
         case "block_append_text": {
@@ -171,13 +181,13 @@ export function useAgentBlockOps({
           } else {
             editor.insertBlocks([json], editor.document[0].id, "before");
           }
-          onAgentTouch(op.id);
+          cbsRef.current.onAgentTouch(op.id);
           break;
         }
         case "meta_update":
           // No editor mutation, but propagate so the parent's meta state
           // (and the auto-publish hook keyed on meta.status) refreshes.
-          onMetaUpdate?.(op.meta);
+          cbsRef.current.onMetaUpdate?.(op.meta);
           break;
       }
     }
@@ -209,7 +219,7 @@ export function useAgentBlockOps({
               data.blocks.map(draftToBN),
             );
           }
-          onSnapshot(data);
+          cbsRef.current.onSnapshot(data);
         } else if (data.type === "draft.op") {
           applyOp(data.op, data.touched_block_id);
         }
@@ -223,7 +233,7 @@ export function useAgentBlockOps({
       if (reconnectTimer.current) window.clearTimeout(reconnectTimer.current);
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
-  }, [editor, sessionId, onSnapshot, onAgentTouch]);
+  }, [editor, sessionId]);
 }
 
 function draftTypeFromBN(t: string): string {
