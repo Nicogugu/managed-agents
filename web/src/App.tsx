@@ -230,7 +230,11 @@ export function App() {
         />
       )}
 
-      <div className={`flex-1 min-h-0 flex ${editorOpen ? "lg:flex-row flex-col" : ""}`}>
+      {/* Layout: chat scrolls. On lg+, when editor is open it shares the
+          horizontal axis. On mobile, the editor renders as a full-screen
+          overlay below so we don't squeeze the chat (which the user is still
+          actively reading). */}
+      <div className={`flex-1 min-h-0 flex ${editorOpen ? "lg:flex-row" : ""}`}>
       <main
         ref={scrollRef}
         className={`flex-1 min-h-0 overflow-auto ${
@@ -282,7 +286,12 @@ export function App() {
       </main>
 
       {editorOpen && (
-        <section className="flex-1 min-h-0 min-w-0 border-t lg:border-t-0 border-border">
+        <section
+          className="
+            hidden lg:flex flex-1 min-h-0 min-w-0 border-l border-border
+            lg:relative
+          "
+        >
           <EditorPane
             sessionId={sessionId}
             seedHtml={editorSeed}
@@ -303,12 +312,29 @@ export function App() {
       )}
       </div>
 
-      {!editorOpen && <ChatInput sessionId={sessionId} onSend={sendText} />}
+      {/* Mobile: full-screen overlay editor (below lg) */}
       {editorOpen && (
-        <div className="border-t border-border">
-          <ChatInput sessionId={sessionId} onSend={sendText} />
+        <div className="lg:hidden fixed inset-0 z-40 flex flex-col bg-bg-primary">
+          <EditorPane
+            sessionId={sessionId}
+            seedHtml={editorSeed}
+            onClose={() => {
+              setEditorOpen(false);
+              setEditorSeed(null);
+              draftAuto.reset();
+            }}
+            onPublished={(p) => {
+              setToast({
+                text: `Publié · #${p.id}`,
+                link: p.link,
+              });
+            }}
+            onToast={(t) => setToast({ text: t })}
+          />
         </div>
       )}
+
+      <ChatInput sessionId={sessionId} onSend={sendText} />
 
       {pendingDraft && (
         <PublishEditor

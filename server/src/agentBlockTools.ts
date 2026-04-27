@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import type { BlockOp, DraftBlock, PostMeta } from "./contract.js";
 import { getDraft } from "./draftStore.js";
 import { htmlToBlocks } from "./htmlBlocks.js";
-import { getPost, listPosts } from "./wordpress.js";
+import {
+  getPost,
+  listPosts,
+  listCategories,
+  listTags,
+  listMedia,
+} from "./wordpress.js";
 
 /**
  * Dispatcher for the block_* (and a few wp_* read helpers) custom tools used
@@ -40,6 +46,11 @@ export const BLOCK_TOOL_NAMES = new Set([
   "meta_update",
   "wp_load_post",
   "wp_search_posts",
+  "wp_list_posts",
+  "wp_get_post",
+  "wp_list_categories",
+  "wp_list_tags",
+  "wp_list_media",
 ]);
 
 export async function dispatchBlockTool(
@@ -130,18 +141,61 @@ export async function dispatchBlockTool(
         return { content: diag("meta updated") };
       }
 
-      // ---- WP read helpers used during streaming ----
-      case "wp_search_posts": {
+      // ---- WP read helpers ----
+      case "wp_search_posts":
+      case "wp_list_posts": {
         const hits = (await listPosts({
-          search: input.query,
-          status: input.status === "any" ? undefined : input.status,
-        })) as Array<{ id: number; title: string; slug: string; status: string }>;
-        const summary = hits
-          .map((h) => `${h.id}\t${h.status}\t${h.title}\t${h.slug}`)
-          .join("\n");
-        return {
-          content: diag(`Found ${hits.length} posts:\nid\tstatus\ttitle\tslug\n${summary}`),
+          search: input.query || input.search,
+          status:
+            input.status && input.status !== "any" ? input.status : undefined,
+          per_page: input.per_page,
+        })) as Array<{
+          id: number;
+          title: string;
+          slug: string;
+          status: string;
+          date?: string;
+          excerpt?: string;
+          link?: string;
+        }>;
+        return { content: diag(JSON.stringify({ posts: hits }, null, 2)) };
+      }
+      case "wp_get_post": {
+        const post = (await getPost(Number(input.id))) as any;
+        // Return a compact view (drop _links, embedded, etc. that bloat tokens)
+        const compact = {
+          id: post.id,
+          title: post.title?.raw || post.title?.rendered,
+          slug: post.slug,
+          status: post.status,
+          date: post.date,
+          excerpt: post.excerpt?.raw || post.excerpt?.rendered,
+          content: post.content?.raw || post.content?.rendered,
+          categories: post.categories,
+          tags: post.tags,
+          featured_media: post.featured_media,
+          modified_gmt: post.modified_gmt,
+          meta: {
+            yoast_title: post.meta?._yoast_wpseo_title,
+            yoast_description: post.meta?._yoast_wpseo_metadesc,
+            yoast_focuskw: post.meta?._yoast_wpseo_focuskw,
+            rank_math_title: post.meta?.rank_math_title,
+            rank_math_description: post.meta?.rank_math_description,
+          },
         };
+        return { content: diag(JSON.stringify(compact, null, 2)) };
+      }
+      case "wp_list_categories": {
+        const cats = await listCategories();
+        return { content: diag(JSON.stringify({ categories: cats }, null, 2)) };
+      }
+      case "wp_list_tags": {
+        const tags = await listTags(input.search);
+        return { content: diag(JSON.stringify({ tags }, null, 2)) };
+      }
+      case "wp_list_media": {
+        const media = await listMedia(input.per_page ?? 20);
+        return { content: diag(JSON.stringify({ media }, null, 2)) };
       }
       case "wp_load_post": {
         const post = (await getPost(Number(input.id))) as any;

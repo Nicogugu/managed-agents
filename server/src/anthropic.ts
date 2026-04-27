@@ -115,22 +115,18 @@ Mets-la à jour à chaque tour. Le frontend l'affiche dans un panel sticky.
 Tu disposes de:
 - **bash, write, edit, read, glob, grep** dans ta sandbox (brouillons, plans, notes)
 - **web_search, web_fetch** pour la recherche
-${PUBLIC_BASE_URL ? `- **API serveur** sur \`${PUBLIC_BASE_URL}\` (lecture seule + génération d'image)` : ""}
-
-${
-  PUBLIC_BASE_URL
-    ? `
-## Endpoints API serveur
-
-Lecture (avec \`web_fetch\`) :
-- \`GET ${PUBLIC_BASE_URL}/api/wp/posts\` — liste articles. Filtres: \`?status=draft|publish|any\`, \`?search=mot\`, \`?per_page=10\`. Réponse: \`{posts: [{id, title, status, slug, date, excerpt, link}]}\`.
-- \`GET ${PUBLIC_BASE_URL}/api/wp/posts/{id}\` — article complet pour update.
-- \`GET ${PUBLIC_BASE_URL}/api/wp/categories\` — \`{categories: [{id, name, slug, count}]}\`.
-- \`GET ${PUBLIC_BASE_URL}/api/wp/tags?search=mot\` — \`{tags: [...]}\`.
-- \`GET ${PUBLIC_BASE_URL}/api/wp/media\` — médias récents pour réutilisation.
+- **Custom tools WordPress** : tu n'as PAS d'accès direct à l'API WP via \`web_fetch\` (Basic Auth te bloquerait à 401). Tu DOIS passer par les custom tools listés ci-dessous, qui s'exécutent côté serveur avec les credentials.
 
 ## Custom tools natifs (préfère-les à bash+curl)
 
+**Lecture WP** (passent par le serveur, pas d'auth à gérer côté agent) :
+- \`wp_list_posts({ status?, search?, per_page? })\` → \`{posts: [{id, title, status, slug, date, excerpt, link}]}\`
+- \`wp_get_post({ id })\` → article complet pour update
+- \`wp_list_categories()\` → \`{categories: [{id, name, slug, count}]}\`
+- \`wp_list_tags({ search? })\` → \`{tags: [...]}\`
+- \`wp_list_media({ per_page? })\` → médias récents pour réutilisation
+
+**Écriture / génération** :
 - \`wp_image_generate({ prompt, alt_text?, aspect_ratio?, image_size?, title? })\`
   → Génère une image via Nano Banana et l'upload dans WP Media. Retourne \`{id, url, alt_text, mime_type}\`.
   → Prompt en anglais, style cinématique. \`id\` = \`featured_media\`, \`url\` = source pour \`<img src>\`.
@@ -160,9 +156,7 @@ Utilise ce flux pour DRAFT au lieu d'écrire dans \`/tmp/article.html\` :
 
 ⚠️ **PUBLICATION (rappel)** : un seul bloc \`wp-post\` OU un seul appel \`wp_publish\` par turn — JAMAIS les deux (créerait un doublon). En mode block ops, ne pas émettre de \`wp-post\` non plus — l'utilisateur publie depuis l'éditeur.
 
-Statuts \`wp-post.status\` possibles : \`draft\`, \`publish\`, \`pending\`, \`private\`. Par défaut, mets \`publish\` si l'utilisateur a dit explicitement "publie", sinon \`draft\`. Le frontend force \`publish\` automatiquement en mode auto.`
-    : ""
-}
+Statuts \`wp-post.status\` possibles : \`draft\`, \`publish\`, \`pending\`, \`private\`. Par défaut, mets \`publish\` si l'utilisateur a dit explicitement "publie", sinon \`draft\`. Le frontend force \`publish\` automatiquement en mode auto.
 
 # Mode click-only (CRITIQUE)
 
@@ -270,7 +264,61 @@ Réponds en français. Sois concis. Sois rigoureux sur le workflow.`;
 // Custom tools exposés à l'agent. Plus propre que bash+curl: chaque appel
 // donne un agent.custom_tool_use typé, le serveur l'exécute et renvoie
 // user.custom_tool_result. Évite les coûts de tokens du curl + parse JSON.
+//
+// IMPORTANT: les routes /api/wp/* sont protégées par Basic Auth en prod, donc
+// l'agent NE PEUT PAS les appeler en web_fetch direct. Tous les accès WP
+// passent par ces tools (executés côté serveur, qui a les credentials).
 export const CUSTOM_TOOLS = [
+  // ---- WP read tools ----
+  {
+    type: "custom" as const,
+    name: "wp_list_posts",
+    description:
+      "Liste les articles WordPress. Filtres : status (any, draft, publish, pending, private, future), search (texte libre dans le titre/contenu), per_page (par défaut 50, max 100).",
+    input_schema: {
+      type: "object",
+      properties: {
+        status: { type: "string" },
+        search: { type: "string" },
+        per_page: { type: "integer" },
+      },
+    },
+  },
+  {
+    type: "custom" as const,
+    name: "wp_get_post",
+    description:
+      "Récupère un article WP complet par id (title, content, excerpt, status, slug, categories, tags, featured_media, meta SEO). À utiliser pour préparer un update.",
+    input_schema: {
+      type: "object",
+      properties: { id: { type: "integer" } },
+      required: ["id"],
+    },
+  },
+  {
+    type: "custom" as const,
+    name: "wp_list_categories",
+    description: "Liste toutes les catégories WP (id, name, slug, count).",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    type: "custom" as const,
+    name: "wp_list_tags",
+    description: "Liste les tags WP par usage. Filtre optionnel `search`.",
+    input_schema: {
+      type: "object",
+      properties: { search: { type: "string" } },
+    },
+  },
+  {
+    type: "custom" as const,
+    name: "wp_list_media",
+    description: "Liste les médias récents (id, source_url, alt_text, title, mime_type) pour réutilisation.",
+    input_schema: {
+      type: "object",
+      properties: { per_page: { type: "integer" } },
+    },
+  },
   {
     type: "custom" as const,
     name: "wp_image_generate",

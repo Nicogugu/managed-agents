@@ -127,54 +127,75 @@ export function EditorPane({
   const isUpdate = Boolean(meta.post_id);
 
   return (
-    <div className="h-full flex flex-col bg-bg-secondary">
-      {/* Toolbar */}
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-sm flex-shrink-0">
-        <button onClick={loadById} className="btn-ghost" title="Charger un article WP par ID">
-          Charger…
-        </button>
-        <input
-          className="input !py-1 !text-sm flex-1 min-w-0"
-          value={meta.title}
-          onChange={(e) => onMetaChange({ title: e.target.value })}
-          placeholder="Titre de l'article…"
-        />
-        <select
-          className="input !py-1 !text-sm !w-auto"
-          value={meta.status}
-          onChange={(e) => onMetaChange({ status: e.target.value as any })}
-        >
-          <option value="draft">Brouillon</option>
-          <option value="publish">Publier</option>
-          <option value="pending">En attente</option>
-          <option value="private">Privé</option>
-        </select>
-        <button
-          onClick={() => publish(meta.status)}
-          disabled={busy || !sessionId}
-          className="btn-primary"
-        >
-          {busy
-            ? "…"
-            : meta.status === "publish"
-              ? isUpdate
-                ? "Mettre à jour"
-                : "Publier"
-              : "Enregistrer"}
-        </button>
-        <button
-          onClick={() => setShowMeta((s) => !s)}
-          className="btn-ghost"
-          title="Méta"
-          aria-label="Méta"
-        >
-          ⚙
-        </button>
-        {onClose && (
-          <button onClick={onClose} className="btn-ghost" aria-label="Fermer">
-            ×
+    <div className="h-full w-full flex flex-col bg-bg-secondary">
+      {/* Toolbar — wraps on mobile so the title gets a full row of breathing
+          room and the action buttons go below it. */}
+      <div className="border-b border-border flex-shrink-0 px-3 py-2 space-y-2">
+        <div className="flex items-center gap-2">
+          <input
+            className="input !py-1.5 !text-sm flex-1 min-w-0 !font-medium"
+            value={meta.title}
+            onChange={(e) => onMetaChange({ title: e.target.value })}
+            placeholder="Titre de l'article…"
+          />
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="btn-ghost flex-shrink-0 !px-2"
+              aria-label="Fermer l'éditeur"
+              title="Fermer l'éditeur"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path
+                  d="M3 3l8 8M11 3l-8 8"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-2 text-sm">
+          <button
+            onClick={loadById}
+            className="btn-ghost"
+            title="Charger un article WP par ID"
+          >
+            Charger…
           </button>
-        )}
+          <button
+            onClick={() => setShowMeta((s) => !s)}
+            className="btn-ghost"
+            title="Slug, extrait, tags, SEO"
+          >
+            ⚙ Méta
+          </button>
+          <div className="flex-1" />
+          <select
+            className="input !py-1 !text-sm !w-auto"
+            value={meta.status}
+            onChange={(e) => onMetaChange({ status: e.target.value as any })}
+          >
+            <option value="draft">Brouillon</option>
+            <option value="publish">Publier</option>
+            <option value="pending">En attente</option>
+            <option value="private">Privé</option>
+          </select>
+          <button
+            onClick={() => publish(meta.status)}
+            disabled={busy || !sessionId}
+            className="btn-primary"
+          >
+            {busy
+              ? "…"
+              : meta.status === "publish"
+                ? isUpdate
+                  ? "Mettre à jour"
+                  : "Publier"
+                : "Enregistrer"}
+          </button>
+        </div>
       </div>
 
       {/* Review badges (when an original snapshot exists) */}
