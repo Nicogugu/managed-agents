@@ -231,6 +231,39 @@
   cursor: not-allowed;
 }
 
+/* Agent-pending shimmer: while the agent is working on a block (user
+   clicked a quick action / sent a selection-scoped prompt), draw a soft
+   gradient sweep until status returns to idle. */
+@keyframes bn-agent-pending-shimmer {
+  0% { background-position: -150% 0; }
+  100% { background-position: 250% 0; }
+}
+.bn-shell [data-agent-pending="true"] > .bn-block-content {
+  position: relative;
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(94, 106, 210, 0.18) 50%,
+    transparent 100%
+  );
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: bn-agent-pending-shimmer 1.6s ease-in-out infinite;
+  border-radius: 3px;
+}
+.bn-shell [data-agent-pending="true"] > .bn-block-content::after {
+  content: "✦ agent…";
+  position: absolute;
+  right: -56px;
+  top: 4px;
+  font-size: 10px;
+  color: #5e6ad2;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.8;
+  pointer-events: none;
+}
+
 /* User-locked blocks — agent ops are refused server-side. Visual cue:
    amber outline + lock emoji in the gutter. */
 .bn-shell [data-locked="true"] > .bn-block-content {

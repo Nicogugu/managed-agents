@@ -210,6 +210,42 @@ export function InlineEditor({
       // user-edited in the next DOC_STATE injection.
       if (agentOpFlag.applying) return;
       if (Date.now() - mountedAt.current < 1500) return;
+
+      // Defensive dedup pass — BlockNote's drag-drop on atom blocks
+      // (clientBlock, rawHtml, image) sometimes leaves the source in
+      // place AND adds a copy at the destination, producing a visible
+      // duplicate. We detect either same-id duplicates (truly orphaned
+      // copy) or back-to-back identical instance payloads, and remove
+      // the offending block before flushing.
+      const doc = editor.document;
+      const seenIds = new Set<string>();
+      const dupIds: string[] = [];
+      let prevSig = "";
+      for (const b of doc) {
+        if (seenIds.has(b.id)) {
+          dupIds.push(b.id);
+          continue;
+        }
+        seenIds.add(b.id);
+        if (b.type === "clientBlock") {
+          const sig = (b.props as any)?.instance || "";
+          if (sig && sig === prevSig) dupIds.push(b.id);
+          prevSig = sig;
+        } else {
+          prevSig = "";
+        }
+      }
+      if (dupIds.length > 0) {
+        agentOpFlag.applying = true;
+        try {
+          editor.removeBlocks(dupIds);
+        } finally {
+          queueMicrotask(() => {
+            agentOpFlag.applying = false;
+          });
+        }
+      }
+
       if (flushTimer.current) window.clearTimeout(flushTimer.current);
       flushTimer.current = window.setTimeout(async () => {
         flushTimer.current = null;

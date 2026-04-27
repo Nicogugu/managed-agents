@@ -20,12 +20,18 @@ interface Props {
   /** "auto" → publish automatically when meta.status flips to "publish" via
    *  an agent meta_update. "validate" → user must click the Publish button. */
   mode?: "auto" | "validate";
+  /** Block ids the agent is currently working on — receive a shimmer in
+   *  the editor until the agent goes idle. Cleared by the parent. */
+  pendingAgentBlockIds?: string[];
   onClose?: () => void;
   onPublished: (post: { id: number; link?: string }) => void;
   onToast: (msg: string) => void;
   /** Bubbled up so App.tsx can include the current selection's block_ids
    *  in every user.message it sends (DOC_STATE.selection). */
   onSelectionChange?: (blockIds: string[]) => void;
+  /** Fired when the user clicks a quick action (Reformuler, Raccourcir…)
+   *  on a selected block, so the parent can mark those ids as pending. */
+  onQuickAction?: (blockIds: string[]) => void;
 }
 
 /**
@@ -42,10 +48,12 @@ export function EditorPane({
   sessionId,
   seedHtml,
   mode = "validate",
+  pendingAgentBlockIds,
   onClose,
   onPublished,
   onToast,
   onSelectionChange,
+  onQuickAction,
 }: Props) {
   const [editorHandle, setEditorHandle] = useState<EditorHandle | null>(null);
   const [meta, setMeta] = useState<PostMeta>(emptyMeta);
@@ -112,6 +120,22 @@ export function EditorPane({
       if (el) el.setAttribute("data-locked", "true");
     }
   }, [lockedIds, currentBlocks]);
+
+  // Pending shimmer on blocks the agent is currently working on. Cleared
+  // when the parent flips status to idle.
+  useEffect(() => {
+    const root = document.querySelector(".bn-editor");
+    if (!root) return;
+    root
+      .querySelectorAll<HTMLElement>("[data-agent-pending]")
+      .forEach((el) => el.removeAttribute("data-agent-pending"));
+    for (const id of pendingAgentBlockIds || []) {
+      const el = root.querySelector<HTMLElement>(
+        `.bn-block-outer[data-id="${id}"]`,
+      );
+      if (el) el.setAttribute("data-agent-pending", "true");
+    }
+  }, [pendingAgentBlockIds, currentBlocks]);
 
   function revertBlock(b: DraftBlock) {
     if (!editorHandle) return;
@@ -212,12 +236,14 @@ export function EditorPane({
       onToast("Sélectionne un bloc dans l'éditeur d'abord");
       return;
     }
+    onQuickAction?.(selectionBlockIds.slice());
     try {
       await sendMessage(sessionId, prompt, {
         selection_block_ids: selectionBlockIds,
       });
     } catch (err: any) {
       onToast(`Erreur · ${err.message}`);
+      onQuickAction?.([]);
     }
   }
 

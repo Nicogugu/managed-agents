@@ -144,29 +144,45 @@ export function App() {
   // ------- Editor selection (shared with sendMessage so DOC_STATE.selection
   //         always reflects what the user has highlighted in the editor) ----
   const editorSelectionIds = useRef<string[]>([]);
+  // Block ids the agent is currently working on (e.g. user clicked "Reformuler"
+  // on this paragraph or typed a prompt with a selection). Cleared when the
+  // agent goes idle. Used by the editor to show a per-block shimmer while
+  // the agent is processing.
+  const [pendingAgentBlockIds, setPendingAgentBlockIds] = useState<string[]>([]);
+  useEffect(() => {
+    if (status === "idle") setPendingAgentBlockIds([]);
+  }, [status]);
 
   // ------- Send handlers ----------------------------------------------------
   async function sendText(text: string) {
     if (!sessionId) return;
     appendUserMessage(text);
+    if (editorSelectionIds.current.length > 0) {
+      setPendingAgentBlockIds(editorSelectionIds.current.slice());
+    }
     try {
       await sendMessage(sessionId, text, {
         selection_block_ids: editorSelectionIds.current,
       });
     } catch (err: any) {
       setToast({ text: `Erreur · ${err.message}` });
+      setPendingAgentBlockIds([]);
     }
   }
 
   async function sendClick(label: string, value: string) {
     if (!sessionId) return;
     appendUserMessage(label);
+    if (editorSelectionIds.current.length > 0) {
+      setPendingAgentBlockIds(editorSelectionIds.current.slice());
+    }
     try {
       await sendMessage(sessionId, value, {
         selection_block_ids: editorSelectionIds.current,
       });
     } catch (err: any) {
       setToast({ text: `Erreur · ${err.message}` });
+      setPendingAgentBlockIds([]);
     }
   }
 
@@ -288,6 +304,7 @@ export function App() {
             sessionId={sessionId}
             seedHtml={editorSeed}
             mode={mode}
+            pendingAgentBlockIds={pendingAgentBlockIds}
             onClose={() => {
               setEditorOpen(false);
               setEditorSeed(null);
@@ -300,6 +317,7 @@ export function App() {
             onSelectionChange={(ids) => {
               editorSelectionIds.current = ids;
             }}
+            onQuickAction={(blockIds) => setPendingAgentBlockIds(blockIds)}
           />
         </section>
       )}
