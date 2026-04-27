@@ -230,16 +230,21 @@ export function App() {
         />
       )}
 
-      {/* Layout: chat scrolls. On lg+, when editor is open it shares the
-          horizontal axis. On mobile, the editor renders as a full-screen
-          overlay below so we don't squeeze the chat (which the user is still
-          actively reading). */}
-      <div className={`flex-1 min-h-0 flex ${editorOpen ? "lg:flex-row" : ""}`}>
+      {/* Layout: chat + editor in a flex row. The editor is ALWAYS mounted
+          once a session exists (just hidden via CSS when closed) so the
+          BlockNote instance keeps its state and the SSE consumer keeps
+          applying agent ops in real time even while not visible.
+          - lg+ : split, chat shrinks to ~max-w-md
+          - mobile: chat takes full width when editor closed; chat hidden
+            when editor open (editor full-width). */}
+      <div className="flex-1 min-h-0 flex">
       <main
         ref={scrollRef}
-        className={`flex-1 min-h-0 overflow-auto ${
-          editorOpen ? "lg:max-w-md xl:max-w-lg lg:flex-shrink-0 lg:border-r lg:border-border" : ""
-        }`}
+        className={`
+          ${editorOpen ? "hidden lg:block lg:max-w-md xl:max-w-lg lg:flex-shrink-0 lg:border-r lg:border-border" : "flex-1"}
+          min-h-0 overflow-auto
+          ${editorOpen ? "lg:flex-shrink-0" : ""}
+        `}
       >
         <div className={`mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-3 ${editorOpen ? "max-w-2xl" : "max-w-3xl"}`}>
           {error && (
@@ -285,12 +290,13 @@ export function App() {
         </div>
       </main>
 
-      {editorOpen && (
+      {/* Editor — always mounted once sessionId exists; visibility via CSS. */}
+      {sessionId && (
         <section
-          className="
-            hidden lg:flex flex-1 min-h-0 min-w-0 border-l border-border
-            lg:relative
-          "
+          className={`
+            ${editorOpen ? "flex" : "hidden"}
+            flex-1 min-h-0 min-w-0 flex-col
+          `}
         >
           <EditorPane
             sessionId={sessionId}
@@ -301,38 +307,13 @@ export function App() {
               draftAuto.reset();
             }}
             onPublished={(p) => {
-              setToast({
-                text: `Publié · #${p.id}`,
-                link: p.link,
-              });
+              setToast({ text: `Publié · #${p.id}`, link: p.link });
             }}
             onToast={(t) => setToast({ text: t })}
           />
         </section>
       )}
       </div>
-
-      {/* Mobile: full-screen overlay editor (below lg) */}
-      {editorOpen && (
-        <div className="lg:hidden fixed inset-0 z-40 flex flex-col bg-bg-primary">
-          <EditorPane
-            sessionId={sessionId}
-            seedHtml={editorSeed}
-            onClose={() => {
-              setEditorOpen(false);
-              setEditorSeed(null);
-              draftAuto.reset();
-            }}
-            onPublished={(p) => {
-              setToast({
-                text: `Publié · #${p.id}`,
-                link: p.link,
-              });
-            }}
-            onToast={(t) => setToast({ text: t })}
-          />
-        </div>
-      )}
 
       <ChatInput sessionId={sessionId} onSend={sendText} />
 
