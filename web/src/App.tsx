@@ -3,6 +3,8 @@ import { useSession } from "./useSession";
 import { sendMessage, publishDraft, fetchHealth } from "./api";
 import { extractDrafts, extractTodos } from "./parseDraft";
 import { PublishEditor } from "./components/PublishEditor";
+import { EditorPane } from "./components/editor/EditorPane";
+import { useDraftAutoOpen } from "./lib/useDraftAutoOpen";
 import {
   type Mode,
   type PublishState,
@@ -23,6 +25,12 @@ type Health = { ok: boolean; anthropicKey: boolean; wpConfigured: boolean };
 
 export function App() {
   const { sessionId, messages, status, error, lastEventAt, appendUserMessage, newSession } = useSession();
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorSeed, setEditorSeed] = useState<string | null>(null);
+  const draftAuto = useDraftAutoOpen(sessionId);
+  useEffect(() => {
+    if (draftAuto.shouldOpen && !editorOpen) setEditorOpen(true);
+  }, [draftAuto.shouldOpen, editorOpen]);
 
   // ------- Activity tracking ------------------------------------------------
   const [now, setNow] = useState(Date.now());
@@ -222,8 +230,14 @@ export function App() {
         />
       )}
 
-      <main ref={scrollRef} className="flex-1 overflow-auto">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-3">
+      <div className={`flex-1 min-h-0 flex ${editorOpen ? "lg:flex-row flex-col" : ""}`}>
+      <main
+        ref={scrollRef}
+        className={`flex-1 min-h-0 overflow-auto ${
+          editorOpen ? "lg:max-w-md xl:max-w-lg lg:flex-shrink-0 lg:border-r lg:border-border" : ""
+        }`}
+      >
+        <div className={`mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-3 ${editorOpen ? "max-w-2xl" : "max-w-3xl"}`}>
           {error && (
             <div className="surface border-red-500/40 bg-red-500/10 text-red-300 text-sm rounded-md p-3">
               {error}
@@ -254,10 +268,47 @@ export function App() {
             />
           ))}
           {status === "running" && <Thinking activity={activity} silenceSec={silenceSec} />}
+          {!editorOpen && (
+            <div className="text-center pt-4">
+              <button
+                onClick={() => setEditorOpen(true)}
+                className="text-xs text-text-tertiary hover:text-text-primary border border-border rounded-md px-3 py-1.5 transition-colors"
+              >
+                Ouvrir l'éditeur de blocs
+              </button>
+            </div>
+          )}
         </div>
       </main>
 
-      <ChatInput sessionId={sessionId} onSend={sendText} />
+      {editorOpen && (
+        <section className="flex-1 min-h-0 min-w-0 border-t lg:border-t-0 border-border">
+          <EditorPane
+            sessionId={sessionId}
+            seedHtml={editorSeed}
+            onClose={() => {
+              setEditorOpen(false);
+              setEditorSeed(null);
+              draftAuto.reset();
+            }}
+            onPublished={(p) => {
+              setToast({
+                text: `Publié · #${p.id}`,
+                link: p.link,
+              });
+            }}
+            onToast={(t) => setToast({ text: t })}
+          />
+        </section>
+      )}
+      </div>
+
+      {!editorOpen && <ChatInput sessionId={sessionId} onSend={sendText} />}
+      {editorOpen && (
+        <div className="border-t border-border">
+          <ChatInput sessionId={sessionId} onSend={sendText} />
+        </div>
+      )}
 
       {pendingDraft && (
         <PublishEditor

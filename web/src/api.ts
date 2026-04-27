@@ -75,3 +75,38 @@ export async function publishDraft(draft: WpDraft) {
   if (!res.ok) throw new Error(`WP create failed: ${await res.text()}`);
   return res.json();
 }
+
+// ----- Block editor (v2) draft endpoints --------------------------------
+
+export async function publishCurrentDraft(
+  sessionId: string,
+  status?: string,
+): Promise<{ id: number; link?: string }> {
+  const res = await fetch(`/api/sessions/${sessionId}/draft/publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) throw new Error(`publish failed: ${await res.text()}`);
+  return res.json();
+}
+
+export async function patchDraftMeta(sessionId: string, patch: any) {
+  const res = await fetch(`/api/sessions/${sessionId}/draft/meta`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`meta patch failed: ${await res.text()}`);
+  return res.json();
+}
+
+export async function loadPostIntoDraft(sessionId: string, id: number) {
+  const res = await fetch(`/api/sessions/${sessionId}/draft/load`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+  if (!res.ok) throw new Error(`load failed: ${await res.text()}`);
+  return res.json();
+}

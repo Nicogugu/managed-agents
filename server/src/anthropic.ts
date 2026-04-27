@@ -141,7 +141,24 @@ Lecture (avec \`web_fetch\`) :
   → À utiliser SEULEMENT si l'utilisateur demande explicitement publication immédiate.
   → Sinon préfère le bloc \`wp-post\` (le frontend gère selon mode validation/auto).
 
-⚠️ **PUBLICATION (rappel)** : un seul bloc \`wp-post\` OU un seul appel \`wp_publish\` par turn — JAMAIS les deux (créerait un doublon).
+## Block ops — éditeur Notion temps réel (NEW)
+
+Pour les articles longs (≥ 400 mots) ou pour modifier un article existant, tu peux écrire **bloc par bloc** dans l'éditeur Notion-like. L'utilisateur voit chaque bloc apparaître en streaming → bien mieux que d'attendre un gros wp-post.
+
+Utilise ce flux pour DRAFT au lieu d'écrire dans \`/tmp/article.html\` :
+1. \`doc_init({ blocks: [{ type: "heading", text: "Titre", props: {level: 1} }] })\` — initialise
+2. Enchaîne \`block_insert({ after_id, block })\` paragraphe par paragraphe
+3. \`block_update({ id, ... })\` ou \`block_append_text({ id, delta })\` pour streamer
+4. \`meta_update({ title, slug, excerpt, status, tags, featured_media_url, seo_title, seo_description })\` pour les méta
+5. À la fin, demande à l'utilisateur de cliquer "Publier" — pas de wp-post fence dans ce mode
+
+**Update d'un article existant** : \`wp_load_post({ id })\` charge l'article dans l'éditeur et te renvoie les block_id que tu peux modifier en place avec \`block_update\`. NE RÉÉMETS PAS le document complet.
+
+**Quand utiliser quoi** :
+- Article court (< 400 mots) ou phase REVIEW d'un draft tenu en sandbox → bloc \`wp-post\` (rapide, simple)
+- Article long, modification d'existant, ou demande explicite « écris en direct dans l'éditeur » → block ops
+
+⚠️ **PUBLICATION (rappel)** : un seul bloc \`wp-post\` OU un seul appel \`wp_publish\` par turn — JAMAIS les deux (créerait un doublon). En mode block ops, ne pas émettre de \`wp-post\` non plus — l'utilisateur publie depuis l'éditeur.
 
 Statuts \`wp-post.status\` possibles : \`draft\`, \`publish\`, \`pending\`, \`private\`. Par défaut, mets \`publish\` si l'utilisateur a dit explicitement "publie", sinon \`draft\`. Le frontend force \`publish\` automatiquement en mode auto.`
     : ""
@@ -317,11 +334,172 @@ export const CUSTOM_TOOLS = [
       required: ["action"],
     },
   },
+
+  // ---- Block ops (streaming editor flow) ----
+  // L'agent émet ces tools quand il veut écrire/modifier l'article BLOC PAR BLOC
+  // dans l'éditeur Notion-like. L'utilisateur voit chaque bloc apparaître en
+  // temps réel — beaucoup mieux qu'attendre un gros wp-post JSON en une fois.
+  {
+    type: "custom" as const,
+    name: "doc_init",
+    description:
+      "Initialise un nouvel article dans l'éditeur Notion. À appeler UNE fois au début du DRAFT pour les articles longs (> 400 mots) où tu veux streamer. Pour les courts, garde wp-post.",
+    input_schema: {
+      type: "object",
+      properties: {
+        blocks: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              type: {
+                type: "string",
+                enum: [
+                  "paragraph",
+                  "heading",
+                  "bulletListItem",
+                  "numberedListItem",
+                  "checkListItem",
+                  "quote",
+                  "code",
+                  "image",
+                  "table",
+                  "raw_html",
+                ],
+              },
+              text: { type: "string" },
+              raw: { type: "string" },
+              props: { type: "object" },
+            },
+            required: ["type"],
+          },
+        },
+      },
+      required: ["blocks"],
+    },
+  },
+  {
+    type: "custom" as const,
+    name: "block_insert",
+    description:
+      "Insère un bloc après after_id (ou en tête si null/omis). Renvoie l'id du nouveau bloc.",
+    input_schema: {
+      type: "object",
+      properties: {
+        after_id: { type: "string" },
+        block: { type: "object" },
+      },
+      required: ["block"],
+    },
+  },
+  {
+    type: "custom" as const,
+    name: "block_update",
+    description:
+      "Remplace le contenu/type/props d'un bloc existant. Le patch est shallow-mergé.",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        type: { type: "string" },
+        text: { type: "string" },
+        raw: { type: "string" },
+        props: { type: "object" },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    type: "custom" as const,
+    name: "block_append_text",
+    description:
+      "Ajoute un fragment de texte à la fin d'un bloc text. À utiliser pour le streaming token-par-token sur un long paragraphe — beaucoup plus rapide perçu qu'un block_update sur le bloc complet.",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        delta: { type: "string" },
+      },
+      required: ["id", "delta"],
+    },
+  },
+  {
+    type: "custom" as const,
+    name: "block_delete",
+    description: "Supprime un bloc.",
+    input_schema: {
+      type: "object",
+      properties: { id: { type: "string" } },
+      required: ["id"],
+    },
+  },
+  {
+    type: "custom" as const,
+    name: "block_move",
+    description: "Déplace un bloc après after_id (ou en tête si null).",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        after_id: { type: "string" },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    type: "custom" as const,
+    name: "meta_update",
+    description:
+      "Met à jour les méta de l'article en cours dans l'éditeur (titre, slug, excerpt, status, tags, image à la une, SEO).",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        slug: { type: "string" },
+        excerpt: { type: "string" },
+        status: { type: "string", enum: ["draft", "publish", "pending", "private", "future"] },
+        scheduled_at: { type: "string" },
+        tags: { type: "array", items: { type: "string" } },
+        featured_media_url: { type: "string" },
+        seo_title: { type: "string" },
+        seo_description: { type: "string" },
+        seo_focus_keyword: { type: "string" },
+      },
+    },
+  },
+  {
+    type: "custom" as const,
+    name: "wp_search_posts",
+    description: "Recherche des articles WP existants par titre/slug.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        status: {
+          type: "string",
+          enum: ["any", "draft", "publish", "pending", "private", "future"],
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    type: "custom" as const,
+    name: "wp_load_post",
+    description:
+      "Charge un article WP dans l'éditeur. Renvoie la liste des block_id pour que tu puisses faire des block_update ciblés. À utiliser pour modifier un article existant (au lieu d'émettre un wp-post).",
+    input_schema: {
+      type: "object",
+      properties: { id: { type: "integer" } },
+      required: ["id"],
+    },
+  },
 ];
 
 // Bumpé quand on change la composition des tools: la fonction de réutilisation
 // d'agent matche par nom, donc renommer force la création d'un agent neuf.
-const AGENT_NAME = "wp-editor-v2";
+const AGENT_NAME = "wp-editor-v3";
 // Défaut: Sonnet 4.6 standard — bon équilibre vitesse/coût/qualité.
 // Pour passer en Opus 4.6 + fast (premium): AGENT_MODEL=claude-opus-4-6 AGENT_SPEED=fast
 // Voir https://platform.claude.com/docs/en/managed-agents/agent-setup

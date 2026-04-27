@@ -5,7 +5,7 @@ import "@blocknote/core/fonts/inter.css";
 import "@blocknote/mantine/style.css";
 import "./BlockEditor.css";
 
-import { editorSchema } from "./blockEditorSchema";
+import { editorSchema } from "./editor/blockEditorSchema";
 import type { WpDraft } from "../types";
 import { publishDraft } from "../api";
 

@@ -12,8 +12,13 @@ import {
   listTags,
   listMedia,
   uploadMedia,
+  uploadMediaFromUrl,
   type WpPostInput,
 } from "./wordpress.js";
+import { dispatchBlockTool } from "./agentBlockTools.js";
+import { getDraft } from "./draftStore.js";
+import { blocksToHtml, htmlToBlocks } from "./htmlBlocks.js";
+import type { PostMeta } from "./contract.js";
 
 // ---- Cost / usage tracking ----------------------------------------------
 // On agrège les tokens consommés via les events span.model_request_end
@@ -92,6 +97,26 @@ async function dispatchCustomTool(
   let isError = false;
 
   try {
+    // Try the block-ops dispatcher first (returns null if `name` isn't ours).
+    const blockResult = await dispatchBlockTool(sessionId, name, input);
+    if (blockResult) {
+      try {
+        await client.beta.sessions.events.send(sessionId, {
+          events: [
+            {
+              type: "user.custom_tool_result",
+              custom_tool_use_id: useId,
+              is_error: blockResult.is_error || false,
+              content: blockResult.content,
+            } as any,
+          ],
+        });
+      } catch (err: any) {
+        console.error(`[custom-tool] failed to send block result:`, err?.message);
+      }
+      return;
+    }
+
     if (name === "wp_image_generate") {
       const img = await generateImage({
         prompt: input.prompt,
@@ -620,6 +645,132 @@ export function createApp(): Express {
       res.json(post);
     } catch (err: any) {
       console.error("[wp] update error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // -------------------- Draft (block editor) routes ---------------------
+  // Dedicated SSE channel for the editor: draft.snapshot + draft.op events
+  // forwarded from the in-memory projection mutated by the block_* tools.
+
+  app.get("/api/sessions/:id/draft/stream", (req, res) => {
+    const { id } = req.params;
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders?.();
+    const draft = getDraft(id);
+    res.write(`data: ${JSON.stringify(draft.snapshot())}\n\n`);
+    draft.listeners.add(res);
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(": ping\n\n");
+      } catch {}
+    }, 15000);
+    req.on("close", () => {
+      draft.listeners.delete(res);
+      clearInterval(heartbeat);
+    });
+  });
+
+  app.get("/api/sessions/:id/draft", (req, res) => {
+    const draft = getDraft(req.params.id);
+    res.json({
+      blocks: draft.state.blocks,
+      meta: draft.state.meta,
+      original: draft.state.original,
+    });
+  });
+
+  app.put("/api/sessions/:id/draft/meta", (req, res) => {
+    const draft = getDraft(req.params.id);
+    const patch = req.body as Partial<PostMeta>;
+    draft.state.meta = {
+      ...draft.state.meta,
+      ...patch,
+      seo: { ...draft.state.meta.seo, ...(patch.seo || {}) },
+    };
+    draft.emit({ type: "draft.op", op: { op: "meta_update", meta: patch } });
+    res.json(draft.state.meta);
+  });
+
+  app.post("/api/sessions/:id/draft/load", writeLimit, async (req, res) => {
+    try {
+      const draft = getDraft(req.params.id);
+      const postId = Number(req.body?.id);
+      if (!postId) return res.status(400).json({ error: "id required" });
+      const post = (await getPost(postId)) as any;
+      const html = post.content?.raw ?? post.content?.rendered ?? "";
+      const blocks = htmlToBlocks(html);
+      const meta: PostMeta = {
+        post_id: post.id,
+        title: post.title?.raw || post.title?.rendered || "",
+        slug: post.slug || "",
+        excerpt: post.excerpt?.raw || post.excerpt?.rendered || "",
+        status: post.status || "draft",
+        categories: post.categories || [],
+        tags: post.tags || [],
+        featured_media: post.featured_media || null,
+        featured_media_url: null,
+        modified_gmt: post.modified_gmt || null,
+        seo: {
+          title: post.meta?._yoast_wpseo_title || post.meta?.rank_math_title,
+          description:
+            post.meta?._yoast_wpseo_metadesc || post.meta?.rank_math_description,
+          focus_keyword:
+            post.meta?._yoast_wpseo_focuskw || post.meta?.rank_math_focus_keyword,
+        },
+      };
+      draft.apply({ op: "doc_load", blocks, post_id: post.id, meta });
+      draft.emit(draft.snapshot());
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Publish the current draft as a WP post (create or update based on
+  // meta.post_id). Reuses createPost/updatePost which already handle dedup
+  // and tag resolution.
+  app.post("/api/sessions/:id/draft/publish", writeLimit, async (req, res) => {
+    try {
+      const draft = getDraft(req.params.id);
+      const meta = draft.state.meta;
+      const html = blocksToHtml(draft.state.blocks);
+      const status = (req.body?.status as string) || meta.status || "draft";
+      const payload: WpPostInput = {
+        title: meta.title,
+        slug: meta.slug || undefined,
+        content: html,
+        excerpt: meta.excerpt || undefined,
+        status: status as WpPostInput["status"],
+        tags: meta.tags?.length ? (meta.tags as any) : undefined,
+      };
+      const result: any = meta.post_id
+        ? await updatePost(meta.post_id, payload)
+        : await createPost(payload);
+      draft.state.meta = {
+        ...draft.state.meta,
+        post_id: result.id,
+        status: status as any,
+      };
+      draft.state.original = JSON.parse(JSON.stringify(draft.state.blocks));
+      draft.emit(draft.snapshot());
+      res.json(result);
+    } catch (err: any) {
+      console.error("[draft] publish error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/sessions/:id/draft/media", writeLimit, async (req, res) => {
+    try {
+      const url = req.body?.url as string;
+      if (!url) return res.status(400).json({ error: "url required" });
+      const m = await uploadMediaFromUrl(url);
+      res.json({ id: m.id, source_url: m.source_url });
+    } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });

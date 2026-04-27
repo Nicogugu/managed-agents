@@ -4,7 +4,7 @@ import { createReactBlockSpec } from "@blocknote/react";
 /**
  * `rawHtml` block: fallback for content the server couldn't parse into a
  * known block type (Gutenberg comments, shortcodes, exotic HTML). Renders the
- * stored HTML read-only inside the editor; on serialise the editor takes the
+ * stored HTML read-only inside the editor; on save the server takes the
  * `html` prop verbatim.
  */
 const RawHtmlBlock = createReactBlockSpec(

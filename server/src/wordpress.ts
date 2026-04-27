@@ -167,6 +167,22 @@ export async function listMedia(perPage = 20): Promise<WpMediaItem[]> {
   }));
 }
 
+/**
+ * Convenience wrapper used by meta_update({ featured_media_url }) — fetch the
+ * remote image, upload to WP, return {id, source_url}.
+ */
+export async function uploadMediaFromUrl(url: string, filename?: string) {
+  const src = await fetch(url);
+  if (!src.ok) throw new Error(`fetch image failed (${src.status}) for ${url}`);
+  const buf = Buffer.from(await src.arrayBuffer());
+  const ct = src.headers.get("content-type") || "application/octet-stream";
+  const guessed =
+    filename ||
+    url.split("/").pop()?.split("?")[0] ||
+    `upload-${Date.now()}.${ct.split("/")[1] || "bin"}`;
+  return uploadMedia({ data: buf, filename: guessed, mimeType: ct });
+}
+
 export async function uploadMedia(opts: {
   data: Buffer;
   filename: string;

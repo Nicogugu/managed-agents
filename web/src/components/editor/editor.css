@@ -1,0 +1,91 @@
+/* Override BlockNote dark theme to match Linear-inspired palette. */
+.bn-shell {
+  height: 100%;
+  overflow: auto;
+  --bn-colors-editor-background: #0f1011;
+  --bn-colors-editor-text: #f7f8f8;
+  --bn-colors-menu-background: #16181c;
+  --bn-colors-menu-text: #f7f8f8;
+  --bn-colors-tooltip-background: #1c1f23;
+  --bn-colors-tooltip-text: #f7f8f8;
+  --bn-colors-hovered-background: #1c1f23;
+  --bn-colors-selected-background: rgba(94, 106, 210, 0.18);
+  --bn-colors-selected-text: #ffffff;
+  --bn-colors-disabled-background: #0f1011;
+  --bn-colors-disabled-text: #62666d;
+  --bn-colors-shadow: rgba(0, 0, 0, 0.4);
+  --bn-colors-border: #23262d;
+  --bn-colors-side-menu: #62666d;
+  --bn-colors-highlights-gray-background: #1c1f23;
+  --bn-font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  background: var(--bn-colors-editor-background);
+}
+
+.bn-shell .bn-container {
+  background: transparent;
+}
+
+.bn-shell .bn-editor {
+  padding: 32px 28px 200px;
+}
+
+@media (max-width: 768px) {
+  .bn-shell .bn-editor {
+    padding: 16px 12px 160px;
+  }
+}
+
+/* Highlight blocks the agent just touched. */
+.bn-shell [data-agent-edited="true"] > .bn-block-content {
+  position: relative;
+  background: rgba(94, 106, 210, 0.08);
+  transition: background 800ms ease-out;
+}
+.bn-shell [data-agent-edited="true"] > .bn-block-content::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: #5e6ad2;
+  border-radius: 2px;
+}
+
+/* Diff badges in the gutter (added by ReviewBadges). */
+.bn-shell [data-diff="added"] > .bn-block-content::before,
+.bn-shell [data-diff="modified"] > .bn-block-content::before {
+  content: "";
+  position: absolute;
+  left: -14px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 2px;
+}
+.bn-shell [data-diff="added"] > .bn-block-content::before {
+  background: #10b981;
+}
+.bn-shell [data-diff="modified"] > .bn-block-content::before {
+  background: #f59e0b;
+}
+
+.bn-shell .rawhtml-block {
+  display: block;
+  padding: 8px 10px;
+  margin: 4px 0;
+  border-left: 2px dashed #2e323a;
+  color: #b4bcd0;
+  font-size: 13px;
+  background: rgba(94, 106, 210, 0.04);
+  border-radius: 4px;
+}
+.bn-shell .rawhtml-block::before {
+  content: "raw HTML";
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #62666d;
+  margin-bottom: 4px;
+}
