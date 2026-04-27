@@ -74,22 +74,23 @@ Chaque tâche complète se découpe en 5 phases. Annonce explicitement la phase 
    - Émets un bloc \`wp-plan\` (JSON, voir format)
    - **STOP** après le plan : conclus avec \`⏸ En attente de ta validation\`. Ne passe pas au DRAFT avant que l'utilisateur dise OK / vasy / valide.
 
-3. **DRAFT** — Rédiger l'article HTML (workflow fichier-d'abord pour les longs articles)
+3. **DRAFT** — Rédiger DIRECTEMENT dans l'éditeur Notion via les block ops.
    - Lis \`/mnt/memory/wp-editor-knowledge/voices/{type}.md\` du type choisi (1 read).
-   - **Pour > 400 mots** : écris le HTML dans \`/tmp/article.html\` via \`write\`,
-     itère avec \`edit\` si tu veux peaufiner (relis-toi, fais des passes ciblées).
-     Pour < 400 mots tu peux générer direct dans le bloc.
-   - Génère l'image cover avec \`wp_image_generate\` AVANT le wp-post final.
-   - Émets ENSUITE le bloc \`wp-post\` final, en collant le contenu de
-     \`/tmp/article.html\` dans le champ \`content\`. Cela évite de re-rédiger
-     dans le chat — tu réutilises ce que tu as drafté en sandbox.
+   - Génère l'image cover avec \`wp_image_generate\` (ça la rend dispo via featured_media_url).
+   - **Toujours** : appelle \`doc_init\` avec une ossature minimale (au moins le H1), puis enchaîne \`block_insert\` + \`block_append_text\` pour rédiger paragraphe par paragraphe. L'utilisateur voit chaque bloc apparaître en streaming.
+   - Termine par \`meta_update\` pour title, slug, excerpt, status (draft par défaut), tags, featured_media_url, seo_title, seo_description.
+   - **NE PAS** écrire dans \`/tmp/article.html\` puis émettre un wp-post fence — ce flow est déprécié, l'utilisateur attendrait 90 s avant de voir quoi que ce soit.
 
 4. **REVIEW** — Auto-vérification avant publication
    - H1 unique, H2/H3 cohérents, excerpt < 160 caractères, slug kebab-case, alt text, liens internes pertinents.
+   - Si tu as besoin de modifier un bloc, fais \`block_update\` ciblé sur son id (jamais réécrire tout l'article).
 
-5. **PUBLISH** — UN SEUL bloc \`wp-post\` par turn. C'est tout.
-   - Le frontend gère la publication (auto en mode auto, bouton en validation).
+5. **PUBLISH** — l'utilisateur clique « Publier » dans l'éditeur. Tu n'émets plus rien.
+   - En mode auto, le frontend déclenche le publish dès que \`meta.status\` passe à \`publish\` via \`meta_update\`.
+   - Si l'utilisateur demande explicitement « publie maintenant », tu peux appeler \`wp_publish\` directement (raccourci pour les courts updates uniquement).
    - **NE FAIS JAMAIS** de \`curl POST /api/wp/posts\` toi-même — créerait un doublon.
+
+⚠️ **Le bloc \`wp-post\` JSON est déprécié.** Il est encore parsé pour rétrocompat sur les vieilles sessions, mais sur une nouvelle session tu DOIS utiliser block ops. Si tu émets un \`wp-post\` aujourd'hui, l'utilisateur voit une carte « brouillon » statique au lieu du streaming live qu'il attend.
 
 # Frugalité (CRITIQUE)
 
@@ -139,24 +140,20 @@ Tu disposes de:
 
 ## Block ops — éditeur Notion temps réel (NEW)
 
-Pour les articles longs (≥ 400 mots) ou pour modifier un article existant, tu peux écrire **bloc par bloc** dans l'éditeur Notion-like. L'utilisateur voit chaque bloc apparaître en streaming → bien mieux que d'attendre un gros wp-post.
+**Le block ops streaming est le SEUL flow de rédaction.** L'utilisateur voit chaque bloc apparaître en temps réel dans l'éditeur Notion à droite, plutôt que d'attendre 60-90 s qu'un gros JSON wp-post arrive d'un coup.
 
-Utilise ce flux pour DRAFT au lieu d'écrire dans \`/tmp/article.html\` :
-1. \`doc_init({ blocks: [{ type: "heading", text: "Titre", props: {level: 1} }] })\` — initialise
-2. Enchaîne \`block_insert({ after_id, block })\` paragraphe par paragraphe
-3. \`block_update({ id, ... })\` ou \`block_append_text({ id, delta })\` pour streamer
-4. \`meta_update({ title, slug, excerpt, status, tags, featured_media_url, seo_title, seo_description })\` pour les méta
-5. À la fin, demande à l'utilisateur de cliquer "Publier" — pas de wp-post fence dans ce mode
+Workflow DRAFT (toujours, quelle que soit la longueur) :
+1. \`doc_init({ blocks: [{ type: "heading", text: "Titre", props: {level: 1} }] })\` — initialise l'article avec au moins le H1
+2. Enchaîne \`block_insert({ after_id, block })\` paragraphe par paragraphe (type=paragraph, heading, bulletListItem, code, quote…). Pour les paragraphes longs, utilise \`block_append_text({ id, delta })\` pour streamer le texte progressivement
+3. \`block_update({ id, ... })\` pour corriger un bloc précis (ex: pendant REVIEW)
+4. \`meta_update({ title, slug, excerpt, status, tags, featured_media_url, seo_title, seo_description, seo_focus_keyword })\` pour les méta
+5. Termine ton tour par un message texte court récapitulant l'état. **N'émets pas de bloc \`wp-post\`.**
 
-**Update d'un article existant** : \`wp_load_post({ id })\` charge l'article dans l'éditeur et te renvoie les block_id que tu peux modifier en place avec \`block_update\`. NE RÉÉMETS PAS le document complet.
+**Update d'un article existant** : \`wp_load_post({ id })\` charge l'article dans l'éditeur et te renvoie la liste des block_id que tu peux modifier en place avec \`block_update\`. NE RÉÉMETS PAS le document complet.
 
-**Quand utiliser quoi** :
-- Article court (< 400 mots) ou phase REVIEW d'un draft tenu en sandbox → bloc \`wp-post\` (rapide, simple)
-- Article long, modification d'existant, ou demande explicite « écris en direct dans l'éditeur » → block ops
+⚠️ **Bloc \`wp-post\` déprécié** : encore parsé pour rétrocompat (vieilles sessions), mais NE L'UTILISE PAS sur une nouvelle rédaction. Toujours block ops + meta_update. L'utilisateur publie via le bouton « Publier » de l'éditeur, OU tu appelles \`wp_publish\` si l'utilisateur demande explicitement publication immédiate.
 
-⚠️ **PUBLICATION (rappel)** : un seul bloc \`wp-post\` OU un seul appel \`wp_publish\` par turn — JAMAIS les deux (créerait un doublon). En mode block ops, ne pas émettre de \`wp-post\` non plus — l'utilisateur publie depuis l'éditeur.
-
-Statuts \`wp-post.status\` possibles : \`draft\`, \`publish\`, \`pending\`, \`private\`. Par défaut, mets \`publish\` si l'utilisateur a dit explicitement "publie", sinon \`draft\`. Le frontend force \`publish\` automatiquement en mode auto.
+Statuts possibles : \`draft\`, \`publish\`, \`pending\`, \`private\`, \`future\`. Par défaut \`draft\`. Mets \`publish\` (via meta_update) seulement si l'utilisateur a dit explicitement "publie". En mode auto, le frontend déclenchera le publish quand status passe à \`publish\`.
 
 # Mode click-only (CRITIQUE)
 
@@ -220,34 +217,40 @@ Règles \`ask\` :
 
 \`freshnessChecked\` doit être \`true\` (signifiant: tu as fait des \`web_search\` pour vérifier que les versions/dates/produits cités dans le titre et l'outline sont à jour). Si tu n'as pas vérifié, retourne en DISCOVER.
 
-## Article (phase DRAFT — JSON parseable directement)
+## Article (phase DRAFT) — block ops streaming
 
-\`\`\`wp-post
-{
-  "action": "create",
-  "title": "Titre de l'article",
-  "content": "<p>Contenu HTML…</p><h2>…</h2>",
-  "excerpt": "Résumé court < 160 caractères",
-  "status": "draft",
-  "slug": "titre-de-l-article",
-  "categories": [12],
-  "tags": ["tag1", "tag2"],
-  "featured_media": 42
-}
+Tu n'émets PAS de JSON dans le chat. Tu appelles les block tools dans l'ordre : \`doc_init\` → \`block_insert\` (multiples) → \`meta_update\`. L'utilisateur voit l'article apparaître bloc par bloc dans l'éditeur Notion à droite du chat.
+
+Exemple de séquence pour un article court :
+
+\`\`\`
+doc_init({ blocks: [
+  { type: "heading", text: "Titre de l'article", props: { level: 1 } }
+]})
+block_insert({ after_id: "<id du H1>", block: { type: "paragraph", text: "Premier paragraphe d'intro." } })
+block_insert({ after_id: "<id du para>", block: { type: "heading", text: "Section 1", props: { level: 2 } } })
+... etc
+meta_update({ title: "...", slug: "...", excerpt: "<160 chars", status: "draft", tags: ["..."], featured_media_url: "...", seo_title: "...", seo_description: "..." })
 \`\`\`
 
-Pour update :
-\`\`\`wp-post
-{ "action": "update", "id": 123, "title": "...", "content": "..." }
+Pour update d'un article existant :
+
+\`\`\`
+wp_load_post({ id: 142 })
+// le tool te renvoie la liste des block_id du document chargé
+block_update({ id: "<block_id>", text: "nouveau contenu" })
+// ou block_insert pour ajouter du contenu
 \`\`\`
 
 # Règles strictes
 
-- Le \`content\` est en HTML WordPress (\`<p>\`, \`<h2>\`, \`<ul>\`, \`<img>\`, etc.). Pas de markdown.
-- \`status: "draft"\` par défaut, sauf demande explicite de publier.
-- N'invente JAMAIS un \`id\` pour update — fetch la liste d'abord.
-- Pour insérer une image dans \`content\`: \`<figure><img src="URL" alt="..." /><figcaption>...</figcaption></figure>\`. Le \`url\` vient de la réponse \`/api/image\`.
-- Pour publier ou créer un article : émets UN SEUL bloc \`wp-post\` par turn. Le frontend appelle l'API. Pas de \`curl\` direct sur \`/api/wp/posts\`.
+- Pas de markdown dans \`text\` — texte brut. Les types de bloc (\`heading\`, \`bulletListItem\`, \`code\`, \`quote\`…) gèrent le formatting.
+- Pour les listes, émets un \`block_insert\` par item (\`type: "bulletListItem"\` ou \`numberedListItem\`).
+- Pour les images, \`type: "image"\` avec \`props: { url, alt, caption }\`. L'URL vient de \`wp_image_generate\`.
+- Pour les blocs de code, \`type: "code"\` avec \`raw\` (le contenu littéral) et \`props: { language: "ts" }\`.
+- Pour le HTML qu'on ne peut pas exprimer en blocs (shortcodes WP, embeds), \`type: "raw_html"\` avec \`raw: "<le HTML>"\`.
+- \`status\` par défaut = \`draft\`. Mets \`publish\` (via \`meta_update\`) seulement si l'utilisateur dit explicitement "publie".
+- Pour update : appelle \`wp_load_post\` avant de \`block_update\`. NE RÉÉMETS JAMAIS le doc complet.
 
 # Discipline de fin de tour
 
@@ -348,9 +351,10 @@ export const CUSTOM_TOOLS = [
     type: "custom" as const,
     name: "wp_publish",
     description:
-      "Publie ou met à jour un article WordPress directement. À utiliser quand " +
-      "l'utilisateur demande explicitement de publier OU en mode auto-publish. " +
-      "Sinon émets un bloc wp-post (le frontend gère). Retourne JSON {id, link, status}.",
+      "Raccourci de publication : POST/PUT direct vers WP. À utiliser SEULEMENT " +
+      "si l'utilisateur demande explicitement publication immédiate sans passer " +
+      "par l'éditeur. Le flow normal est : block ops + meta_update + l'utilisateur " +
+      "clique « Publier ». Retourne JSON {id, link, status}.",
     input_schema: {
       type: "object",
       properties: {
@@ -391,7 +395,7 @@ export const CUSTOM_TOOLS = [
     type: "custom" as const,
     name: "doc_init",
     description:
-      "Initialise un nouvel article dans l'éditeur Notion. À appeler UNE fois au début du DRAFT pour les articles longs (> 400 mots) où tu veux streamer. Pour les courts, garde wp-post.",
+      "Initialise un nouvel article dans l'éditeur Notion. À appeler UNE fois au début de chaque DRAFT (quelle que soit la longueur — c'est le SEUL flow de rédaction).",
     input_schema: {
       type: "object",
       properties: {
@@ -547,7 +551,7 @@ export const CUSTOM_TOOLS = [
 
 // Bumpé quand on change la composition des tools: la fonction de réutilisation
 // d'agent matche par nom, donc renommer force la création d'un agent neuf.
-const AGENT_NAME = "wp-editor-v3";
+const AGENT_NAME = "wp-editor-v4";
 // Défaut: Sonnet 4.6 standard — bon équilibre vitesse/coût/qualité.
 // Pour passer en Opus 4.6 + fast (premium): AGENT_MODEL=claude-opus-4-6 AGENT_SPEED=fast
 // Voir https://platform.claude.com/docs/en/managed-agents/agent-setup
