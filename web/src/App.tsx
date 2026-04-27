@@ -234,16 +234,18 @@ export function App() {
           once a session exists (just hidden via CSS when closed) so the
           BlockNote instance keeps its state and the SSE consumer keeps
           applying agent ops in real time even while not visible.
-          - lg+ : split, chat shrinks to ~max-w-md
-          - mobile: chat takes full width when editor closed; chat hidden
-            when editor open (editor full-width). */}
+          - md+ (>=768px, includes phones in landscape): split — chat
+            shrinks to ~320-450px, editor takes the rest
+          - portrait phone (<768px): chat full-width when closed, fully
+            hidden when editor open (editor takes the full screen). */}
       <div className="flex-1 min-h-0 flex">
       <main
         ref={scrollRef}
         className={`
-          ${editorOpen ? "hidden lg:block lg:max-w-md xl:max-w-lg lg:flex-shrink-0 lg:border-r lg:border-border" : "flex-1"}
+          ${editorOpen
+            ? "hidden md:block md:max-w-xs lg:max-w-sm xl:max-w-md md:flex-shrink-0 md:border-r md:border-border"
+            : "flex-1"}
           min-h-0 overflow-auto
-          ${editorOpen ? "lg:flex-shrink-0" : ""}
         `}
       >
         <div className={`mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-3 ${editorOpen ? "max-w-2xl" : "max-w-3xl"}`}>
