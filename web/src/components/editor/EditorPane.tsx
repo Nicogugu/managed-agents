@@ -121,21 +121,44 @@ export function EditorPane({
     }
   }, [lockedIds, currentBlocks]);
 
-  // Pending shimmer on blocks the agent is currently working on. Cleared
-  // when the parent flips status to idle.
+  // Pending shimmer on blocks the agent is currently working on. We use a
+  // MutationObserver so the attribute survives BlockNote's re-render cycles
+  // (a draft.op block_update tears down + recreates the .bn-block-outer DOM
+  // node, dropping our manually-set data-agent-pending attr otherwise).
   useEffect(() => {
     const root = document.querySelector(".bn-editor");
     if (!root) return;
-    root
-      .querySelectorAll<HTMLElement>("[data-agent-pending]")
-      .forEach((el) => el.removeAttribute("data-agent-pending"));
-    for (const id of pendingAgentBlockIds || []) {
-      const el = root.querySelector<HTMLElement>(
-        `.bn-block-outer[data-id="${id}"]`,
-      );
-      if (el) el.setAttribute("data-agent-pending", "true");
-    }
-  }, [pendingAgentBlockIds, currentBlocks]);
+    const apply = () => {
+      root
+        .querySelectorAll<HTMLElement>("[data-agent-pending]")
+        .forEach((el) => el.removeAttribute("data-agent-pending"));
+      for (const id of pendingAgentBlockIds || []) {
+        const el = root.querySelector<HTMLElement>(
+          `.bn-block-outer[data-id="${id}"]`,
+        );
+        if (el) el.setAttribute("data-agent-pending", "true");
+      }
+    };
+    apply();
+    if (!pendingAgentBlockIds || pendingAgentBlockIds.length === 0) return;
+    // Re-apply on every DOM mutation under the editor while pending — covers
+    // the brief window when the agent's block_update tears down + recreates
+    // the matching .bn-block-outer. Throttle via rAF so we don't run on every
+    // single mutation when BlockNote re-renders heavily.
+    let raf: number | null = null;
+    const obs = new MutationObserver(() => {
+      if (raf != null) return;
+      raf = requestAnimationFrame(() => {
+        raf = null;
+        apply();
+      });
+    });
+    obs.observe(root, { childList: true, subtree: true, attributes: false });
+    return () => {
+      obs.disconnect();
+      if (raf != null) cancelAnimationFrame(raf);
+    };
+  }, [pendingAgentBlockIds]);
 
   function revertBlock(b: DraftBlock) {
     if (!editorHandle) return;
