@@ -15,10 +15,37 @@ interface DraftState {
   meta: PostMeta;
   /** Snapshot at last `doc_load` — used by the editor for diff/review. */
   original: DraftBlock[] | null;
+  /**
+   * Per-block edit metadata. Mapped by blockId. Used to:
+   * - Tell the agent which blocks the user has manually modified (so it
+   *   can avoid clobbering them carelessly).
+   * - Power undo by replaying the inverse of the last agent batch.
+   */
+  blockMeta: Record<
+    string,
+    {
+      user_edited_at?: number;
+      agent_edited_at?: number;
+    }
+  >;
+  /**
+   * Ops emitted in the current "agent turn" (since the last user.message).
+   * Each batch is captured as a snapshot of pre-state we can restore on undo.
+   * Capped at the most recent 10 turns so memory stays bounded.
+   */
+  history: Array<{
+    started_at: number;
+    /** Snapshot of blocks BEFORE this turn started — used to undo. */
+    blocks_before: DraftBlock[];
+    blockMeta_before: DraftState["blockMeta"];
+    op_count: number;
+  }>;
+  /** Index in history of the currently-running turn (latest), or -1. */
+  current_turn_index: number;
 }
 
 interface PersistedShape {
-  version: 1;
+  version: 2;
   state: DraftState;
   saved_at: string;
 }
@@ -57,6 +84,9 @@ class Draft {
     blocks: [],
     meta: { ...emptyMeta },
     original: null,
+    blockMeta: {},
+    history: [],
+    current_turn_index: -1,
   };
   /** Connected SSE clients listening for draft events. */
   listeners = new Set<Response>();
@@ -92,8 +122,89 @@ class Draft {
 
   apply(op: BlockOp): { ok: boolean; touchedId?: string; error?: string } {
     const result = this.applyInner(op);
-    if (result.ok) this.scheduleSave();
+    if (result.ok) {
+      // Stamp agent-edited timestamp on the touched block (block ops are by
+      // definition agent-emitted at this layer — user edits go through
+      // setBlocksFromUser).
+      if (result.touchedId) {
+        this.state.blockMeta[result.touchedId] = {
+          ...this.state.blockMeta[result.touchedId],
+          agent_edited_at: Date.now(),
+        };
+      }
+      // Increment op_count of current turn if one is open
+      if (this.state.current_turn_index >= 0) {
+        const turn = this.state.history[this.state.current_turn_index];
+        if (turn) turn.op_count++;
+      }
+      this.scheduleSave();
+    }
     return result;
+  }
+
+  /**
+   * Replace blocks from a user-driven manual edit (the BlockNote onChange
+   * flush). Stamps user_edited_at on every block whose content changed
+   * compared to the previous state, so the agent can see what the user
+   * touched. Doesn't open a history turn (user undo uses BlockNote's
+   * native ProseMirror history).
+   */
+  setBlocksFromUser(blocks: DraftBlock[]): void {
+    const now = Date.now();
+    const prevById = new Map(this.state.blocks.map((b) => [b.id, b]));
+    for (const b of blocks) {
+      const prev = prevById.get(b.id);
+      const sameContent =
+        prev && JSON.stringify(prev.content) === JSON.stringify(b.content) &&
+        JSON.stringify(prev.props) === JSON.stringify(b.props);
+      if (!sameContent) {
+        this.state.blockMeta[b.id] = {
+          ...this.state.blockMeta[b.id],
+          user_edited_at: now,
+        };
+      }
+    }
+    this.state.blocks = blocks;
+    this.scheduleSave();
+  }
+
+  /**
+   * Open a new agent turn — captures the current state so we can undo
+   * everything the agent does until the next openTurn() call.
+   */
+  openTurn(): void {
+    const snapshot = {
+      started_at: Date.now(),
+      blocks_before: JSON.parse(JSON.stringify(this.state.blocks)),
+      blockMeta_before: JSON.parse(JSON.stringify(this.state.blockMeta)),
+      op_count: 0,
+    };
+    this.state.history.push(snapshot);
+    // Cap to last 10 turns
+    if (this.state.history.length > 10) {
+      this.state.history.splice(0, this.state.history.length - 10);
+    }
+    this.state.current_turn_index = this.state.history.length - 1;
+    this.scheduleSave();
+  }
+
+  /**
+   * Roll the most recent turn back to its pre-state. Returns the restored
+   * blocks so the caller can emit a snapshot.
+   */
+  undoLastTurn(): { ok: boolean; reason?: string } {
+    // Pick the most recent turn that actually had ops; turns with op_count=0
+    // (e.g. user msg with no agent reply yet) are skipped.
+    let i = this.state.history.length - 1;
+    while (i >= 0 && this.state.history[i].op_count === 0) i--;
+    if (i < 0) return { ok: false, reason: "no agent ops to undo" };
+    const turn = this.state.history[i];
+    this.state.blocks = turn.blocks_before;
+    this.state.blockMeta = turn.blockMeta_before;
+    this.state.history.splice(i, 1);
+    this.state.current_turn_index = -1;
+    this.scheduleSave();
+    return { ok: true };
   }
 
   private applyInner(op: BlockOp): {
@@ -202,7 +313,7 @@ class Draft {
     }
     this.dirty = false;
     const payload: PersistedShape = {
-      version: 1,
+      version: 2,
       state: this.state,
       saved_at: new Date().toISOString(),
     };
@@ -228,12 +339,19 @@ class Draft {
     try {
       const file = pathFor(this.sessionId);
       const raw = await fs.readFile(file, "utf8");
-      const parsed = JSON.parse(raw) as PersistedShape;
-      if (parsed?.version === 1 && parsed.state) {
+      const parsed = JSON.parse(raw) as any;
+      // v1 lacked blockMeta/history/current_turn_index — backfill defaults.
+      if ((parsed?.version === 1 || parsed?.version === 2) && parsed.state) {
         this.state = {
           blocks: parsed.state.blocks || [],
           meta: { ...emptyMeta, ...(parsed.state.meta || {}), seo: parsed.state.meta?.seo || {} },
           original: parsed.state.original || null,
+          blockMeta: parsed.state.blockMeta || {},
+          history: parsed.state.history || [],
+          current_turn_index:
+            typeof parsed.state.current_turn_index === "number"
+              ? parsed.state.current_turn_index
+              : -1,
         };
       }
     } catch (err: any) {

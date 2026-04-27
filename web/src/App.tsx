@@ -141,12 +141,18 @@ export function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
+  // ------- Editor selection (shared with sendMessage so DOC_STATE.selection
+  //         always reflects what the user has highlighted in the editor) ----
+  const editorSelectionIds = useRef<string[]>([]);
+
   // ------- Send handlers ----------------------------------------------------
   async function sendText(text: string) {
     if (!sessionId) return;
     appendUserMessage(text);
     try {
-      await sendMessage(sessionId, text);
+      await sendMessage(sessionId, text, {
+        selection_block_ids: editorSelectionIds.current,
+      });
     } catch (err: any) {
       setToast({ text: `Erreur · ${err.message}` });
     }
@@ -156,7 +162,9 @@ export function App() {
     if (!sessionId) return;
     appendUserMessage(label);
     try {
-      await sendMessage(sessionId, value);
+      await sendMessage(sessionId, value, {
+        selection_block_ids: editorSelectionIds.current,
+      });
     } catch (err: any) {
       setToast({ text: `Erreur · ${err.message}` });
     }
@@ -283,6 +291,9 @@ export function App() {
               setToast({ text: `Publié · #${p.id}`, link: p.link });
             }}
             onToast={(t) => setToast({ text: t })}
+            onSelectionChange={(ids) => {
+              editorSelectionIds.current = ids;
+            }}
           />
         </section>
       )}

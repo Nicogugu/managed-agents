@@ -49,7 +49,7 @@ describe("sendMessage", () => {
       "/api/sessions/sess_1/message",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ text: "hello" }),
+        body: JSON.stringify({ text: "hello", selection_block_ids: [] }),
       }),
     );
   });

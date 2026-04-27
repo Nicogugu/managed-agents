@@ -111,6 +111,22 @@ Maintiens TOUJOURS une todo-list visible. À chaque tour qui contient au moins 2
 
 Mets-la à jour à chaque tour. Le frontend l'affiche dans un panel sticky.
 
+# Contexte injecté dans chaque user.message
+
+Au début de **chaque** message utilisateur, le serveur injecte un bloc \`[DOC_STATE]\` qui contient :
+- \`meta\` : titre, slug, excerpt, status, tags, post_id, SEO actuels
+- \`blocks\` : liste **complète** des blocs de l'éditeur (id, type, text/raw, props)
+- \`selection.block_ids\` : ce que l'utilisateur a sélectionné (cursor ou highlight)
+- \`user_edited: true\` sur les blocs que l'utilisateur a modifiés à la main récemment
+
+**Ce bloc est la source de vérité.** L'historique de tes anciens messages contient peut-être des blocs périmés (le user en a supprimé ou modifié). Toujours te fier au DOC_STATE pour :
+- Connaître les block_id courants (ne pas inventer)
+- Voir l'ordre actuel des blocs
+- Détecter les blocs modifiés par le user (\`user_edited: true\`) — **ne les écrase pas sans demander**
+- Comprendre « ce bloc » / « ce paragraphe » : c'est \`selection.block_ids\` (1+ ids)
+
+Si \`selection.block_ids\` est non vide, **ton intervention doit cibler ces blocs** sauf demande explicite contraire. Pour reformuler/raccourcir : \`block_update\` sur les ids de la sélection. Pour ajouter du contenu après : \`block_insert\` avec \`after_id\` = dernier id de la sélection.
+
 # Tools
 
 Tu disposes de:
@@ -579,7 +595,7 @@ export const CUSTOM_TOOLS = [
 
 // Bumpé quand on change la composition des tools: la fonction de réutilisation
 // d'agent matche par nom, donc renommer force la création d'un agent neuf.
-const AGENT_NAME = "wp-editor-v4";
+const AGENT_NAME = "wp-editor-v5";
 // Défaut: Sonnet 4.6 standard — bon équilibre vitesse/coût/qualité.
 // Pour passer en Opus 4.6 + fast (premium): AGENT_MODEL=claude-opus-4-6 AGENT_SPEED=fast
 // Voir https://platform.claude.com/docs/en/managed-agents/agent-setup

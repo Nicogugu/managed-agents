@@ -4,6 +4,15 @@ import { draftToBN } from "./blockConvert";
 
 type Editor = any;
 
+/**
+ * Module-level flag set to true while we're applying an agent-emitted op
+ * to BlockNote (replaceBlocks/insertBlocks/updateBlock etc.). InlineEditor's
+ * onChange handler reads this flag and skips its user-edit flush so we don't
+ * round-trip agent ops back to the server (which would also incorrectly mark
+ * those blocks as `user_edited` in DOC_STATE).
+ */
+export const agentOpFlag = { applying: false };
+
 interface Options {
   editor: Editor | null;
   sessionId: string | null;
@@ -45,6 +54,8 @@ export function useAgentBlockOps({
       rafRef.current = null;
       const map = pendingAppends.current;
       pendingAppends.current = new Map();
+      agentOpFlag.applying = true;
+      try {
       for (const [id, delta] of map) {
         const block = editor.getBlock(id);
         if (!block) continue;
@@ -55,6 +66,11 @@ export function useAgentBlockOps({
             : "";
         editor.updateBlock(id, { content: cur + delta } as any);
         onAgentTouch(id);
+      }
+      } finally {
+        queueMicrotask(() => {
+          agentOpFlag.applying = false;
+        });
       }
     }
 
@@ -85,6 +101,19 @@ export function useAgentBlockOps({
     }
 
     function applyOp(op: BlockOp, touchedId?: string) {
+      agentOpFlag.applying = true;
+      try {
+        return applyOpInner(op, touchedId);
+      } finally {
+        // Defer the flag reset to next tick so BlockNote's onChange (which
+        // fires synchronously after replaceBlocks) sees the flag still true.
+        queueMicrotask(() => {
+          agentOpFlag.applying = false;
+        });
+      }
+    }
+
+    function applyOpInner(op: BlockOp, touchedId?: string) {
       switch (op.op) {
         case "doc_init":
         case "doc_load": {

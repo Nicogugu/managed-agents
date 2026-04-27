@@ -9,6 +9,7 @@ import {
   patchDraftMeta,
   loadPostIntoDraft,
   sendMessage,
+  undoAgent,
 } from "../../api";
 
 interface Props {
@@ -21,6 +22,9 @@ interface Props {
   onClose?: () => void;
   onPublished: (post: { id: number; link?: string }) => void;
   onToast: (msg: string) => void;
+  /** Bubbled up so App.tsx can include the current selection's block_ids
+   *  in every user.message it sends (DOC_STATE.selection). */
+  onSelectionChange?: (blockIds: string[]) => void;
 }
 
 /**
@@ -40,6 +44,7 @@ export function EditorPane({
   onClose,
   onPublished,
   onToast,
+  onSelectionChange,
 }: Props) {
   const [editorHandle, setEditorHandle] = useState<EditorHandle | null>(null);
   const [meta, setMeta] = useState<PostMeta>(emptyMeta);
@@ -140,6 +145,32 @@ export function EditorPane({
     }
   }
 
+  async function undoAgentTurn() {
+    if (!sessionId) return;
+    try {
+      await undoAgent(sessionId);
+      onToast("↶ Dernière intervention de l'agent annulée");
+    } catch (err: any) {
+      onToast(err.message || "Rien à annuler");
+    }
+  }
+
+  /** Ask the agent to operate on the currently-selected block(s). */
+  async function quickAction(prompt: string) {
+    if (!sessionId) return;
+    if (selectionBlockIds.length === 0) {
+      onToast("Sélectionne un bloc dans l'éditeur d'abord");
+      return;
+    }
+    try {
+      await sendMessage(sessionId, prompt, {
+        selection_block_ids: selectionBlockIds,
+      });
+    } catch (err: any) {
+      onToast(`Erreur · ${err.message}`);
+    }
+  }
+
   async function sendCmdK(prompt: string, preset?: string) {
     if (!sessionId) return;
     const tag =
@@ -190,6 +221,13 @@ export function EditorPane({
             Charger…
           </button>
           <button
+            onClick={undoAgentTurn}
+            className="btn-ghost"
+            title="Annule la dernière action de l'agent (block_insert / block_update / block_delete du dernier tour)"
+          >
+            ↶ Annuler agent
+          </button>
+          <button
             onClick={() => setShowMeta((s) => !s)}
             className="btn-ghost"
             title="Slug, extrait, tags, SEO"
@@ -223,6 +261,49 @@ export function EditorPane({
         </div>
       </div>
 
+      {/* Quick actions bar — appears when any block is selected. */}
+      {selectionBlockIds.length > 0 && (
+        <div className="px-3 pt-2 flex-shrink-0">
+          <div className="flex items-center flex-wrap gap-1 text-xs bg-bg-tertiary border border-border rounded-md px-2 py-1">
+            <span className="text-text-tertiary mr-1">
+              {selectionBlockIds.length === 1
+                ? "Bloc sélectionné →"
+                : `${selectionBlockIds.length} blocs sélectionnés →`}
+            </span>
+            <button
+              onClick={() => quickAction("Reformule ce bloc.")}
+              className="btn-ghost !py-0.5 !px-1.5"
+            >
+              ✦ Reformuler
+            </button>
+            <button
+              onClick={() => quickAction("Raccourcis ce bloc.")}
+              className="btn-ghost !py-0.5 !px-1.5"
+            >
+              ↓ Raccourcir
+            </button>
+            <button
+              onClick={() => quickAction("Développe ce bloc.")}
+              className="btn-ghost !py-0.5 !px-1.5"
+            >
+              ↑ Allonger
+            </button>
+            <button
+              onClick={() => quickAction("Corrige fautes et tournures de ce bloc.")}
+              className="btn-ghost !py-0.5 !px-1.5"
+            >
+              ✓ Corriger
+            </button>
+            <button
+              onClick={() => quickAction("Traduis ce bloc en anglais.")}
+              className="btn-ghost !py-0.5 !px-1.5"
+            >
+              🇬🇧 Anglais
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Review badges (when an original snapshot exists) */}
       {original && (
         <div className="px-3 pt-2 flex-shrink-0">
@@ -250,7 +331,11 @@ export function EditorPane({
             }));
           }}
           onOriginalSnapshot={onSnapshotOriginal}
-          onSelectionChange={(s) => setSelectionBlockIds(s?.block_ids ?? [])}
+          onSelectionChange={(s) => {
+            const ids = s?.block_ids ?? [];
+            setSelectionBlockIds(ids);
+            onSelectionChange?.(ids);
+          }}
           onReady={setEditorHandle}
         />
 

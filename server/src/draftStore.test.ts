@@ -64,7 +64,7 @@ describe("draftStore persistence", () => {
     const file = path.join(tmpDir, `${sid}.json`);
     const raw = await fs.readFile(file, "utf8");
     const parsed = JSON.parse(raw);
-    expect(parsed.version).toBe(1);
+    expect(parsed.version).toBe(2);
     expect(parsed.state.blocks).toHaveLength(1);
     expect(parsed.state.blocks[0].content).toBe("Hello");
   });

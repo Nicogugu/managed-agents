@@ -108,20 +108,30 @@ describe("POST /api/sessions/:id/message", () => {
     expect(res.body.error).toBe("text required");
   });
 
-  it("forwards user message via SDK", async () => {
+  it("forwards user message via SDK with DOC_STATE prefix injected", async () => {
     const app = createApp();
     const res = await request(app)
       .post("/api/sessions/sess_1/message")
       .send({ text: "hello" });
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ ok: true });
-    expect(anthropic.client.beta.sessions.events.send).toHaveBeenCalledWith(
-      "sess_1",
-      {
-        events: [
-          { type: "user.message", content: [{ type: "text", text: "hello" }] },
-        ],
-      },
-    );
+    const call = (anthropic.client.beta.sessions.events.send as any).mock.calls[0];
+    expect(call[0]).toBe("sess_1");
+    const payloadText = call[1].events[0].content[0].text;
+    // The user text must be present, prefixed by a [DOC_STATE] block
+    expect(payloadText).toMatch(/^\[DOC_STATE\][\s\S]+\[\/DOC_STATE\]\n\nhello$/);
+  });
+
+  it("accepts a selection_block_ids array and forwards it inside DOC_STATE", async () => {
+    const app = createApp();
+    const res = await request(app)
+      .post("/api/sessions/sess_1/message")
+      .send({ text: "reformule", selection_block_ids: ["b1", "b2"] });
+    expect(res.status).toBe(200);
+    const call = (anthropic.client.beta.sessions.events.send as any).mock.calls[0];
+    const payloadText = call[1].events[0].content[0].text;
+    expect(payloadText).toContain('"block_ids": [');
+    expect(payloadText).toContain('"b1"');
+    expect(payloadText).toContain('"b2"');
   });
 });

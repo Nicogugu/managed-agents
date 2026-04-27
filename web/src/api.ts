@@ -42,11 +42,18 @@ export async function fetchHealth(): Promise<{
   return res.json();
 }
 
-export async function sendMessage(sessionId: string, text: string) {
+export async function sendMessage(
+  sessionId: string,
+  text: string,
+  options?: { selection_block_ids?: string[] },
+) {
   const res = await fetch(`/api/sessions/${sessionId}/message`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({
+      text,
+      selection_block_ids: options?.selection_block_ids ?? [],
+    }),
   });
   if (!res.ok) throw new Error(`sendMessage failed: ${res.status}`);
 }
@@ -108,5 +115,33 @@ export async function loadPostIntoDraft(sessionId: string, id: number) {
     body: JSON.stringify({ id }),
   });
   if (!res.ok) throw new Error(`load failed: ${await res.text()}`);
+  return res.json();
+}
+
+/**
+ * Flush user-edited blocks to the server projection so the agent can see
+ * them on the next turn (DOC_STATE injection). Called debounced from the
+ * editor onChange handler.
+ */
+export async function flushBlocksToServer(sessionId: string, blocks: any[]) {
+  const res = await fetch(`/api/sessions/${sessionId}/draft/blocks`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ blocks }),
+  });
+  if (!res.ok) throw new Error(`flush blocks failed: ${await res.text()}`);
+  return res.json();
+}
+
+/**
+ * Roll back the last completed agent turn. The server replaces the live
+ * blocks with the pre-turn snapshot and emits a draft.snapshot so any
+ * subscribed editor re-renders.
+ */
+export async function undoAgent(sessionId: string) {
+  const res = await fetch(`/api/sessions/${sessionId}/draft/undo`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`undo failed: ${await res.text()}`);
   return res.json();
 }

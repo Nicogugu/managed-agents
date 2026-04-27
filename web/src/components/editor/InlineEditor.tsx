@@ -6,7 +6,7 @@ import "@blocknote/mantine/style.css";
 import "./editor.css";
 
 import { editorSchema } from "./blockEditorSchema";
-import { useAgentBlockOps } from "./useAgentBlockOps";
+import { useAgentBlockOps, agentOpFlag } from "./useAgentBlockOps";
 import { bnToDraft, draftToBN } from "./blockConvert";
 import type { DraftBlock, PostMeta } from "../../contract";
 
@@ -131,6 +131,42 @@ export function InlineEditor({
       if (el) el.setAttribute("data-agent-edited", "true");
     }
   }, [touched]);
+
+  // Flush user edits to server (debounced) so the agent sees the live doc
+  // on its next turn via DOC_STATE injection. We skip the flush during the
+  // first 1.5s after mount to avoid pushing the empty initialContent over
+  // a real persisted state arriving from SSE.
+  const mountedAt = useRef(Date.now());
+  const flushTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (!editor || !sessionId) return;
+    const handler = () => {
+      // Skip if the change came from an agent op — otherwise we'd round-trip
+      // the same blocks back to the server and incorrectly mark them as
+      // user-edited in the next DOC_STATE injection.
+      if (agentOpFlag.applying) return;
+      if (Date.now() - mountedAt.current < 1500) return;
+      if (flushTimer.current) window.clearTimeout(flushTimer.current);
+      flushTimer.current = window.setTimeout(async () => {
+        flushTimer.current = null;
+        try {
+          const blocks = editor.document.map(bnToDraft);
+          await fetch(`/api/sessions/${sessionId}/draft/blocks`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ blocks }),
+          });
+        } catch {
+          // Best-effort: silent. Next mutation will retry.
+        }
+      }, 1000);
+    };
+    const off = editor.onChange?.(handler);
+    return () => {
+      if (typeof off === "function") off();
+      if (flushTimer.current) window.clearTimeout(flushTimer.current);
+    };
+  }, [editor, sessionId]);
 
   // Track selection → propagate block ids upwards.
   useEffect(() => {

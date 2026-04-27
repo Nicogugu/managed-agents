@@ -17,6 +17,7 @@ import {
 } from "./wordpress.js";
 import { dispatchBlockTool } from "./agentBlockTools.js";
 import { getDraft, getDraftReady } from "./draftStore.js";
+import { buildDocState } from "./docState.js";
 import { blocksToHtml, htmlToBlocks } from "./htmlBlocks.js";
 import type { PostMeta } from "./contract.js";
 
@@ -445,10 +446,30 @@ export function createApp(): Express {
     try {
       const { id } = req.params;
       const text = (req.body?.text as string)?.trim();
+      const selectionBlockIds = Array.isArray(req.body?.selection_block_ids)
+        ? (req.body.selection_block_ids as string[])
+        : [];
       if (!text) return res.status(400).json({ error: "text required" });
 
+      // Inject the live DOC_STATE so the agent has the current document
+      // (blocks, meta, selection, recently-user-edited flags) on every turn.
+      // This is the antidote to the "agent works from its own past output"
+      // drift problem.
+      const draft = await getDraftReady(id);
+      const docState = buildDocState(
+        draft.state.blocks,
+        draft.state.meta,
+        draft.state.blockMeta,
+        { selectionBlockIds },
+      );
+      const wrapped = `${docState}\n\n${text}`;
+
+      // Open a new history turn so we can undo every block op the agent
+      // emits in response to this user message.
+      draft.openTurn();
+
       await client.beta.sessions.events.send(id, {
-        events: [{ type: "user.message", content: [{ type: "text", text }] }],
+        events: [{ type: "user.message", content: [{ type: "text", text: wrapped }] }],
       });
       res.json({ ok: true });
     } catch (err: any) {
@@ -684,6 +705,40 @@ export function createApp(): Express {
       meta: draft.state.meta,
       original: draft.state.original,
     });
+  });
+
+  /**
+   * Flush user-driven editor edits (BlockNote onChange). Replaces blocks
+   * wholesale and stamps user_edited_at on whatever changed. The agent
+   * picks up the new state on its next turn via DOC_STATE injection.
+   */
+  app.put("/api/sessions/:id/draft/blocks", async (req, res) => {
+    try {
+      const draft = await getDraftReady(req.params.id);
+      const blocks = req.body?.blocks;
+      if (!Array.isArray(blocks))
+        return res.status(400).json({ error: "blocks[] required" });
+      draft.setBlocksFromUser(blocks);
+      // No SSE emit: the user is the source of this change, no other client
+      // needs to know (and the editor itself already shows them).
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /** Undo the last completed agent turn (rolls blocks back to pre-state). */
+  app.post("/api/sessions/:id/draft/undo", async (req, res) => {
+    try {
+      const draft = await getDraftReady(req.params.id);
+      const r = draft.undoLastTurn();
+      if (!r.ok) return res.status(400).json({ error: r.reason });
+      draft.emit(draft.snapshot());
+      await draft.flush();
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   app.put("/api/sessions/:id/draft/meta", async (req, res) => {
