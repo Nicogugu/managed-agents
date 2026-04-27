@@ -434,6 +434,24 @@ export function useSession() {
     const id = `u_${Date.now()}`;
     setMessages((prev) => [...prev, { id, role: "user", text }]);
     currentAssistantId.current = null; // next agent.message starts a fresh bubble
+    // Optimistic flip to "running" so the UI shows activity right away —
+    // without waiting for Anthropic's session.status_running to come back
+    // through the SSE pump (which can take 1-3s, or never if the pump
+    // stalled). The real server event will reaffirm or correct this.
+    setStatus("running");
+    setLastEventAt(Date.now());
+  }
+
+  /**
+   * Manually reconnect the SSE stream — invoked by the UI's "Reconnecter"
+   * button when the watchdog detects the agent has gone silent too long.
+   */
+  function reconnect() {
+    const id = sessionIdRef.current;
+    if (!id) return;
+    esRef.current?.close();
+    esRef.current = null;
+    connect(id);
   }
 
   return {
@@ -443,6 +461,7 @@ export function useSession() {
     error,
     lastEventAt,
     appendUserMessage,
+    reconnect,
     newSession,
   };
 }

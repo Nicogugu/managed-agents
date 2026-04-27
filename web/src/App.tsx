@@ -24,7 +24,13 @@ import { ChatInput } from "./components/ChatInput";
 type Health = { ok: boolean; anthropicKey: boolean; wpConfigured: boolean };
 
 export function App() {
-  const { sessionId, messages, status, error, lastEventAt, appendUserMessage, newSession } = useSession();
+  const { sessionId, messages, status, error, lastEventAt, appendUserMessage, newSession, reconnect } = useSession();
+  // Watchdog: if the agent is supposedly running but hasn't emitted any
+  // SSE event for >20 s, flag the stream as likely stalled (mobile radio
+  // sleep, server pump crashed, Anthropic SSE drop). The Header surfaces
+  // a "Reconnecter" button instead of the regular status pill.
+  const stalled =
+    status === "running" && lastEventAt > 0 && Date.now() - lastEventAt > 20_000;
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorSeed, setEditorSeed] = useState<string | null>(null);
   const draftAuto = useDraftAutoOpen(sessionId);
@@ -199,6 +205,8 @@ export function App() {
         status={status}
         health={health}
         mode={mode}
+        stalled={stalled}
+        onReconnect={reconnect}
         onModeChange={setMode}
         onNewSession={() => {
           if (

@@ -8,15 +8,19 @@ export function Header({
   status,
   health,
   mode,
+  stalled,
   onModeChange,
   onNewSession,
+  onReconnect,
 }: {
   sessionId: string | null;
   status: Status;
   health: Health | null;
   mode: Mode;
+  stalled?: boolean;
   onModeChange: (m: Mode) => void;
   onNewSession: () => void;
+  onReconnect?: () => void;
 }) {
   return (
     <header className="border-b border-border bg-bg-primary/80 backdrop-blur-md sticky top-0 z-10">
@@ -26,7 +30,18 @@ export function Header({
             <span className="text-accent text-[10px] font-bold">W</span>
           </div>
           <h1 className="text-md font-semibold tracking-tight truncate">WP Editor</h1>
-          <StatusDot status={status} />
+          {stalled && onReconnect ? (
+            <button
+              type="button"
+              onClick={onReconnect}
+              className="inline-flex items-center gap-1.5 text-xs text-amber-300 border border-amber-500/40 bg-amber-500/10 rounded-md px-2 py-0.5 hover:bg-amber-500/20"
+              title="L'agent ne répond plus depuis 20 s — relance le stream"
+            >
+              ⚠ Reconnecter
+            </button>
+          ) : (
+            <StatusDot status={status} />
+          )}
           {health && !health.anthropicKey && (
             <span className="pill !text-amber-300 !border-amber-500/40 !bg-amber-500/10 hidden sm:inline-flex">
               no key
