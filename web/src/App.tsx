@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "./useSession";
 import { sendMessage, publishDraft, fetchHealth } from "./api";
 import { extractDrafts, extractTodos } from "./parseDraft";
-import { PublishModal } from "./PublishModal";
+import { PublishEditor } from "./components/PublishEditor";
 import {
   type Mode,
   type PublishState,
@@ -260,7 +260,7 @@ export function App() {
       <ChatInput sessionId={sessionId} onSend={sendText} />
 
       {pendingDraft && (
-        <PublishModal
+        <PublishEditor
           draft={pendingDraft}
           onClose={() => setPendingDraft(null)}
           onPublished={(post) => {

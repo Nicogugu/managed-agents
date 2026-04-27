@@ -9,3 +9,5 @@ dist/
 .claude/launch.json
 .netlify/
 *.tsbuildinfo
+test-results/
+playwright-report/
