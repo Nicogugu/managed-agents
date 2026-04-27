@@ -33,6 +33,24 @@
   .bn-shell .bn-editor {
     padding: 16px 12px 160px;
   }
+  /* BlockNote default heading sizes are too aggressive on a narrow phone
+     viewport — a 4-word H2 wraps onto 4 lines. Shrink and tighten the
+     line-height so the editor stays readable. */
+  .bn-shell .bn-editor h1,
+  .bn-shell [data-content-type="heading"][data-level="1"] {
+    font-size: 1.6rem !important;
+    line-height: 1.2 !important;
+  }
+  .bn-shell .bn-editor h2,
+  .bn-shell [data-content-type="heading"][data-level="2"] {
+    font-size: 1.3rem !important;
+    line-height: 1.25 !important;
+  }
+  .bn-shell .bn-editor h3,
+  .bn-shell [data-content-type="heading"][data-level="3"] {
+    font-size: 1.1rem !important;
+    line-height: 1.3 !important;
+  }
 }
 
 /* Custom client blocks (Superprof, etc.) — generic styling, the inline
