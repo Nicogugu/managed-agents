@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { InlineEditor, type EditorHandle } from "./InlineEditor";
 import { ReviewBadges } from "./ReviewBadges";
 import { CmdKMenu } from "./CmdKMenu";
@@ -15,6 +15,9 @@ interface Props {
   sessionId: string | null;
   /** Optional seed when the user clicks "Edit inline" on a wp-post DraftCard. */
   seedHtml?: string | null;
+  /** "auto" → publish automatically when meta.status flips to "publish" via
+   *  an agent meta_update. "validate" → user must click the Publish button. */
+  mode?: "auto" | "validate";
   onClose?: () => void;
   onPublished: (post: { id: number; link?: string }) => void;
   onToast: (msg: string) => void;
@@ -33,6 +36,7 @@ interface Props {
 export function EditorPane({
   sessionId,
   seedHtml,
+  mode = "validate",
   onClose,
   onPublished,
   onToast,
@@ -87,6 +91,27 @@ export function EditorPane({
       editorHandle.setBlocks([...blocks, b]);
     }
   }
+
+  // Auto-publish: in "auto" mode, when the agent flips meta.status to a
+  // publish-like value via meta_update, publish automatically. We track the
+  // last meta we published for so a subsequent edit can re-publish (the
+  // agent could update + re-publish the same post). Only triggers on
+  // transitions, not on the initial snapshot.
+  const lastAutoPublishedRef = useRef<string>("");
+  useEffect(() => {
+    if (mode !== "auto") return;
+    if (!sessionId) return;
+    if (busy) return;
+    const triggerable = ["publish", "future"].includes(meta.status);
+    if (!triggerable) return;
+    if (!meta.title?.trim()) return; // no point auto-publishing an untitled doc
+    // Hash on (post_id || "new") + status + title — re-trigger when any
+    // changes meaningfully (e.g. user/agent updates and re-flips to publish)
+    const key = `${meta.post_id || "new"}|${meta.status}|${meta.title}`;
+    if (key === lastAutoPublishedRef.current) return;
+    lastAutoPublishedRef.current = key;
+    void publish(meta.status);
+  }, [meta.status, meta.title, meta.post_id, mode, sessionId, busy]);
 
   async function publish(status?: string) {
     if (!sessionId) return;

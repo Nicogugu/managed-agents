@@ -125,41 +125,11 @@ export function App() {
     fetchHealth().then(setHealth).catch(() => {});
   }, []);
 
-  // Auto-publish on new drafts when in auto mode
-  useEffect(() => {
-    if (mode !== "auto") return;
-    for (const m of messages) {
-      if (m.role !== "assistant") continue;
-      const drafts = extractDrafts(assistantText(m));
-      for (let i = 0; i < drafts.length; i++) {
-        const key = `${m.id}#${i}`;
-        if (handledDrafts.current.has(key)) continue;
-        handledDrafts.current.add(key);
-        const isUpdate = drafts[i].action === "update";
-        setPublishedDrafts((prev) => ({ ...prev, [key]: { status: "pending" } }));
-        publishDraft({ ...drafts[i], status: "publish" })
-          .then((post: any) => {
-            setPublishedDrafts((prev) => ({
-              ...prev,
-              [key]: { status: "published", id: post.id, link: post.link },
-            }));
-            setToast({
-              text: `${isUpdate ? "Mis à jour" : "Publié"} · ${
-                drafts[i].title?.slice(0, 50) || `#${post.id}`
-              }`,
-              link: post.link,
-            });
-          })
-          .catch((err) => {
-            setPublishedDrafts((prev) => ({
-              ...prev,
-              [key]: { status: "error", error: err.message },
-            }));
-            setToast({ text: `Erreur · ${err.message}` });
-          });
-      }
-    }
-  }, [messages, mode]);
+  // Note: auto-publish in this branch is now handled inside EditorPane
+  // (watches the editor's meta.status). The legacy wp-post fence flow is
+  // deprecated — the agent emits block ops + meta_update instead. We still
+  // render historical DraftCards (extractDrafts) so old sessions remain
+  // readable, but we don't auto-publish them.
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -303,6 +273,7 @@ export function App() {
           <EditorPane
             sessionId={sessionId}
             seedHtml={editorSeed}
+            mode={mode}
             onClose={() => {
               setEditorOpen(false);
               setEditorSeed(null);

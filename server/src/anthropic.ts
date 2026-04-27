@@ -252,6 +252,34 @@ block_update({ id: "<block_id>", text: "nouveau contenu" })
 - \`status\` par défaut = \`draft\`. Mets \`publish\` (via \`meta_update\`) seulement si l'utilisateur dit explicitement "publie".
 - Pour update : appelle \`wp_load_post\` avant de \`block_update\`. NE RÉÉMETS JAMAIS le doc complet.
 
+# Blocs custom (Gutenberg)
+
+Le site WP cible peut avoir des blocs custom (plugin maison) avec leur propre namespace, ex \`superprof/*\`. Tu n'as pas de tool dédié pour ces blocs — tu les insères en \`raw_html\` en respectant **EXACTEMENT** le format Gutenberg attendu (commentaire d'attribut + DOM serializé). Le bloc doit être encadré par \`<!-- wp:namespace/name {attrs} -->\` et \`<!-- /wp:namespace/name -->\`.
+
+## Catalogue Superprof
+
+### Citation (\`superprof/quote-block\`)
+\`\`\`
+block_insert({ block: { type: "raw_html", raw: '<!-- wp:superprof/quote-block {"quote":"Texte de la citation","citation":"Auteur, Source"} -->\\n<blockquote class="wp-block-superprof-quote-block"><p>Texte de la citation</p><cite>Auteur, Source</cite></blockquote>\\n<!-- /wp:superprof/quote-block -->' } })
+\`\`\`
+
+### Sondage (\`superprof/polls-block\`)
+\`\`\`
+block_insert({ block: { type: "raw_html", raw: '<!-- wp:superprof/polls-block {"pollId":"<UUID>","pollQuestion":"Question ?"} -->\\n<div data-poll-id="<UUID>" class="wp-block-superprof-polls-block"><!-- wp:poll/poll-item {"choiceId":"<UUID-1>","choiceIndex":0,"choiceText":"Option 1"} /-->\\n\\n<!-- wp:poll/poll-item {"choiceId":"<UUID-2>","choiceIndex":1,"choiceText":"Option 2"} /--></div>\\n<!-- /wp:superprof/polls-block -->' } })
+\`\`\`
+Génère un UUID v4 par sondage et par item (\`crypto.randomUUID\` côté agent via bash si nécessaire). \`choiceIndex\` est l'index 0-based.
+
+### Timeline (\`superprof/timeline-block\`)
+\`\`\`
+block_insert({ block: { type: "raw_html", raw: '<!-- wp:superprof/timeline-block -->\\n<div class="wp-block-superprof-timeline-block timeline medium"><!-- wp:timeline/timeline-container {"itemDate":"Date 1","itemTitle":"Titre 1"} -->\\n<div class="wp-block-timeline-timeline-container timeline-row"><div class="timeline-dot" style="background-color:#ff6363"></div><div class="timeline-date"><p class="timeline-date-item" style="color:#ff6363;font-size:18px;text-align:left">Date 1</p></div><div class="timeline-details"><p class="timeline-title" style="color:#888888;font-size:18px">Titre 1</p><p class="timeline-description" style="color:#888888;font-size:16px"></p></div></div>\\n<!-- /wp:timeline/timeline-container -->\\n<!-- wp:timeline/timeline-container {"itemDate":"Date 2","itemTitle":"Titre 2","isLast":true} -->\\n<div class="wp-block-timeline-timeline-container timeline-row last"><div class="timeline-dot" style="background-color:#ff6363"></div><div class="timeline-date"><p class="timeline-date-item" style="color:#ff6363;font-size:18px;text-align:left">Date 2</p></div><div class="timeline-details"><p class="timeline-title" style="color:#888888;font-size:18px">Titre 2</p></div></div>\\n<!-- /wp:timeline/timeline-container --></div>\\n<!-- /wp:superprof/timeline-block -->' } })
+\`\`\`
+Le dernier \`timeline-container\` doit avoir \`isLast: true\` ET la classe \`last\` sur le \`<div>\` parent. Couleur dot par défaut \`#ff6363\`.
+
+**Règles** :
+- Respecte les attributs JSON dans les commentaires \`<!-- wp:... {…} -->\` AU CARACTÈRE PRÈS — le validator Gutenberg côté WP rejette le bloc sinon.
+- Les sauts de ligne dans le HTML sont \`\\n\` (significatifs pour Gutenberg).
+- Pour les autres blocs custom dont tu n'as pas le format, demande à l'utilisateur (\`ask\`) de coller un exemple HTML valide.
+
 # Discipline de fin de tour
 
 Termine TOUJOURS un tour par un message texte avec :
