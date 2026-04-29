@@ -1,0 +1,423 @@
+/* Override BlockNote dark theme to match Linear-inspired palette. */
+.bn-shell {
+  height: 100%;
+  overflow: auto;
+  --bn-colors-editor-background: #0f1011;
+  --bn-colors-editor-text: #f7f8f8;
+  --bn-colors-menu-background: #16181c;
+  --bn-colors-menu-text: #f7f8f8;
+  --bn-colors-tooltip-background: #1c1f23;
+  --bn-colors-tooltip-text: #f7f8f8;
+  --bn-colors-hovered-background: #1c1f23;
+  --bn-colors-selected-background: rgba(94, 106, 210, 0.18);
+  --bn-colors-selected-text: #ffffff;
+  --bn-colors-disabled-background: #0f1011;
+  --bn-colors-disabled-text: #62666d;
+  --bn-colors-shadow: rgba(0, 0, 0, 0.4);
+  --bn-colors-border: #23262d;
+  --bn-colors-side-menu: #62666d;
+  --bn-colors-highlights-gray-background: #1c1f23;
+  --bn-font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  background: var(--bn-colors-editor-background);
+}
+
+.bn-shell .bn-container {
+  background: transparent;
+}
+
+.bn-shell .bn-editor {
+  padding: 32px 28px 200px;
+}
+
+@media (max-width: 768px) {
+  .bn-shell .bn-editor {
+    padding: 16px 12px 160px;
+  }
+  /* BlockNote default heading sizes are too aggressive on a narrow phone
+     viewport — a 4-word H2 wraps onto 4 lines. Shrink and tighten the
+     line-height so the editor stays readable. */
+  .bn-shell .bn-editor h1,
+  .bn-shell [data-content-type="heading"][data-level="1"] {
+    font-size: 1.6rem !important;
+    line-height: 1.2 !important;
+  }
+  .bn-shell .bn-editor h2,
+  .bn-shell [data-content-type="heading"][data-level="2"] {
+    font-size: 1.3rem !important;
+    line-height: 1.25 !important;
+  }
+  .bn-shell .bn-editor h3,
+  .bn-shell [data-content-type="heading"][data-level="3"] {
+    font-size: 1.1rem !important;
+    line-height: 1.3 !important;
+  }
+}
+
+/* Custom client blocks (Superprof, etc.) — generic styling, the inline
+   form is auto-generated from the descriptor's attrs. */
+.bn-shell .client-block {
+  display: block;
+  margin: 8px 0;
+  border: 1px solid #2e323a;
+  border-left: 2px solid #5e6ad2;
+  border-radius: 4px;
+  background: rgba(94, 106, 210, 0.04);
+  overflow: hidden;
+}
+
+.bn-shell .client-block__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  background: rgba(94, 106, 210, 0.06);
+  border-bottom: 1px solid #2e323a;
+  color: #b4bcd0;
+}
+.bn-shell .client-block__icon {
+  font-size: 14px;
+}
+.bn-shell .client-block__label {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.bn-shell .client-block__ns {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: #62666d;
+  margin-left: 4px;
+  flex: 1;
+}
+.bn-shell .client-block__edit {
+  background: transparent;
+  border: 1px solid #2e323a;
+  color: #b4bcd0;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.bn-shell .client-block__edit:hover {
+  background: #1c1f23;
+  color: #f7f8f8;
+}
+
+.bn-shell .client-block__preview {
+  padding: 12px;
+  color: #d6dae0;
+}
+.bn-shell .client-block__preview blockquote {
+  margin: 0;
+  padding: 8px 12px;
+  border-left: 3px solid #5e6ad2;
+  font-style: italic;
+}
+.bn-shell .client-block__preview cite {
+  display: block;
+  margin-top: 6px;
+  font-style: normal;
+  font-size: 12px;
+  color: #62666d;
+}
+.bn-shell .client-block__attrs dt {
+  font-size: 10px;
+  color: #62666d;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.bn-shell .client-block__attrs dd {
+  margin: 0 0 8px;
+  color: #d6dae0;
+  font-size: 13px;
+}
+
+.bn-shell .client-block__form {
+  padding: 8px 12px 12px;
+  display: grid;
+  gap: 8px;
+}
+.bn-shell .client-block__attr {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.bn-shell .client-block__attr--checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+.bn-shell .client-block__attr-label {
+  font-size: 10px;
+  color: #62666d;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.bn-shell .client-block__required {
+  color: #f87171;
+  margin-left: 2px;
+}
+.bn-shell .client-block__input,
+.bn-shell .client-block__textarea {
+  background: #08090a;
+  color: #f7f8f8;
+  border: 1px solid #2e323a;
+  border-radius: 3px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+.bn-shell .client-block__input:focus,
+.bn-shell .client-block__textarea:focus {
+  border-color: #5e6ad2;
+}
+.bn-shell .client-block__textarea {
+  resize: vertical;
+  min-height: 56px;
+}
+.bn-shell .client-block__hint {
+  font-size: 11px;
+  color: #62666d;
+}
+
+.bn-shell .client-block__children-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 8px;
+  margin-top: 4px;
+  border-top: 1px solid #2e323a;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #62666d;
+}
+.bn-shell .client-block__add {
+  background: transparent;
+  border: 1px solid #2e323a;
+  color: #b4bcd0;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.bn-shell .client-block__add:hover:not(:disabled) {
+  background: #1c1f23;
+}
+.bn-shell .client-block__add:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.bn-shell .client-block__child {
+  border: 1px solid #23262d;
+  border-radius: 3px;
+  padding: 6px 8px;
+  display: grid;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.15);
+}
+.bn-shell .client-block__child-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: #62666d;
+}
+.bn-shell .client-block__child-header span:first-child {
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.bn-shell .client-block__child-header button {
+  background: transparent;
+  border: 1px solid #2e323a;
+  color: #b4bcd0;
+  width: 22px;
+  height: 22px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.bn-shell .client-block__child-header button:hover:not(:disabled) {
+  background: #1c1f23;
+}
+.bn-shell .client-block__child-header button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* Agent-pending shimmer: while the agent is working on a block (user
+   clicked a quick action / sent a selection-scoped prompt), draw a soft
+   gradient sweep until status returns to idle. */
+@keyframes bn-agent-pending-shimmer {
+  0% { background-position: -150% 0; }
+  100% { background-position: 250% 0; }
+}
+@keyframes bn-agent-pending-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+/* Note: BlockNote nests .bn-block-content inside .bn-block inside
+   .bn-block-outer — use the descendant combinator (space) NOT the
+   direct-child combinator (>) so the styling reaches through. */
+.bn-shell [data-agent-pending="true"] .bn-block-content {
+  position: relative;
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(94, 106, 210, 0.28) 50%,
+    transparent 100%
+  );
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: bn-agent-pending-shimmer 1.6s ease-in-out infinite;
+  border-radius: 3px;
+  outline: 1px solid rgba(94, 106, 210, 0.35);
+  outline-offset: 2px;
+}
+.bn-shell [data-agent-pending="true"]::after {
+  content: "✦ agent…";
+  position: absolute;
+  right: -2px;
+  top: -14px;
+  font-size: 10px;
+  color: #5e6ad2;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--bn-colors-editor-background, #0f1011);
+  padding: 0 4px;
+  pointer-events: none;
+  animation: bn-agent-pending-pulse 1.6s ease-in-out infinite;
+}
+.bn-shell [data-agent-pending="true"] {
+  position: relative;
+}
+
+/* User-locked blocks — agent ops are refused server-side. Visual cue:
+   amber outline + lock emoji in the gutter. */
+.bn-shell [data-locked="true"] .bn-block-content {
+  position: relative;
+  outline: 1px solid rgba(245, 158, 11, 0.35);
+  outline-offset: 1px;
+  border-radius: 3px;
+}
+.bn-shell [data-locked="true"] .bn-block-content::after {
+  content: "🔒";
+  position: absolute;
+  right: -22px;
+  top: 4px;
+  font-size: 12px;
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+/* Highlight blocks the agent just touched. */
+.bn-shell [data-agent-edited="true"] .bn-block-content {
+  position: relative;
+  background: rgba(94, 106, 210, 0.08);
+  transition: background 800ms ease-out;
+}
+.bn-shell [data-agent-edited="true"] .bn-block-content::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: #5e6ad2;
+  border-radius: 2px;
+}
+
+/* Diff badges in the gutter (added by ReviewBadges). */
+.bn-shell [data-diff="added"] .bn-block-content::before,
+.bn-shell [data-diff="modified"] .bn-block-content::before {
+  content: "";
+  position: absolute;
+  left: -14px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 2px;
+}
+.bn-shell [data-diff="added"] .bn-block-content::before {
+  background: #10b981;
+}
+.bn-shell [data-diff="modified"] .bn-block-content::before {
+  background: #f59e0b;
+}
+
+.bn-shell .rawhtml-block {
+  display: block;
+  padding: 0;
+  margin: 8px 0;
+  border: 1px solid #2e323a;
+  border-left: 2px solid #5e6ad2;
+  color: #b4bcd0;
+  font-size: 13px;
+  background: rgba(94, 106, 210, 0.04);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.bn-shell .rawhtml-block__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #62666d;
+  background: rgba(94, 106, 210, 0.06);
+  border-bottom: 1px solid #2e323a;
+  user-select: none;
+}
+
+.bn-shell .rawhtml-block__label {
+  font-weight: 600;
+}
+
+.bn-shell .rawhtml-block__toggle {
+  background: transparent;
+  border: 1px solid #2e323a;
+  color: #b4bcd0;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.bn-shell .rawhtml-block__toggle:hover {
+  background: #1c1f23;
+  color: #f7f8f8;
+  border-color: #3d4148;
+}
+
+.bn-shell .rawhtml-block__preview {
+  padding: 10px 12px;
+}
+
+.bn-shell .rawhtml-block__source {
+  display: block;
+  width: 100%;
+  background: #08090a;
+  color: #d6dae0;
+  border: none;
+  border-top: 1px solid transparent;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.bn-shell .rawhtml-block__source:focus {
+  border-top-color: #5e6ad2;
+}

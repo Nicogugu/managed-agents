@@ -1,0 +1,76 @@
+name: cms-lab-agent
+
+# Build local sur la VPS Hostinger (Ubuntu 24.04 + Docker + Traefik en host mode).
+# Routing single-domain: agent.${VPS_IP}.nip.io
+#   /api/*  -> server (Express)
+#   /*      -> web (nginx + React)
+
+networks:
+  default:
+    name: cms-lab-agent_default
+
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    image: managed-agents-server:local
+    pull_policy: never
+    restart: unless-stopped
+    expose:
+      - "3001"
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      WP_BASE_URL: ${WP_BASE_URL}
+      WP_USER: ${WP_USER}
+      WP_APP_PASSWORD: ${WP_APP_PASSWORD}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_IMAGE_MODEL: ${GEMINI_IMAGE_MODEL:-gemini-3.1-flash-image-preview}
+      PUBLIC_BASE_URL: https://agent.${VPS_IP}.nip.io
+      AUTH_USER: ${AUTH_USER}
+      AUTH_PASS: ${AUTH_PASS}
+      PORT: "3001"
+      NODE_ENV: production
+      DRAFT_DIR: /data/drafts
+    # Persist in-flight drafts (block editor projection) so a redeploy
+    # doesn't lose 30 minutes of agent work. The bind mount points to a
+    # host directory that the install.sh script creates with restricted
+    # perms (700, owner=root since the container runs as root).
+    volumes:
+      - /opt/managed-agents/data:/data
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=cms-lab-agent_default
+      - traefik.http.services.agent-server.loadbalancer.server.port=3001
+      - traefik.http.routers.agent-server.rule=Host(`agent.${VPS_IP}.nip.io`) && PathPrefix(`/api`)
+      - traefik.http.routers.agent-server.entrypoints=websecure
+      - traefik.http.routers.agent-server.tls=true
+      - traefik.http.routers.agent-server.tls.certresolver=letsencrypt
+      - traefik.http.routers.agent-server.service=agent-server
+      - traefik.http.routers.agent-server.priority=100
+      # Basic Auth temporairement désactivé pour isoler un panic Traefik
+      # sur le middleware. À réactiver quand le bug sera identifié.
+      # - traefik.http.routers.agent-server.middlewares=editor-auth
+      # - traefik.http.middlewares.editor-auth.basicauth.users=${EDITOR_AUTH_USERS}
+      # - traefik.http.middlewares.editor-auth.basicauth.realm=WP Editor
+
+  web:
+    build:
+      context: ..
+      dockerfile: web/Dockerfile
+    image: managed-agents-web:local
+    pull_policy: never
+    restart: unless-stopped
+    expose:
+      - "80"
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=cms-lab-agent_default
+      - traefik.http.services.agent-web.loadbalancer.server.port=80
+      - traefik.http.routers.agent-web.rule=Host(`agent.${VPS_IP}.nip.io`)
+      - traefik.http.routers.agent-web.entrypoints=websecure
+      - traefik.http.routers.agent-web.tls=true
+      - traefik.http.routers.agent-web.tls.certresolver=letsencrypt
+      - traefik.http.routers.agent-web.service=agent-web
+      - traefik.http.routers.agent-web.priority=10
+      # - traefik.http.routers.agent-web.middlewares=editor-auth@docker
