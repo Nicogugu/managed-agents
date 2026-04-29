@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { InlineEditor, type EditorHandle } from "./InlineEditor";
 import { ReviewBadges } from "./ReviewBadges";
+import { PrePublishReview } from "./PrePublishReview";
 import { CmdKMenu } from "./CmdKMenu";
 import { useAutosave, clearStored } from "../../lib/useAutosave";
 import { type DraftBlock, type PostMeta, emptyMeta } from "../../contract";
@@ -358,6 +359,14 @@ export function EditorPane({
                 : "Enregistrer"}
           </button>
         </div>
+      </div>
+
+      {/* Pre-publish review (legal / fact-check / internal links). */}
+      <div className="px-3 pt-2 flex-shrink-0">
+        <PrePublishReview
+          sessionId={sessionId}
+          onFocusBlock={(id) => editorHandle?.scrollToBlock(id)}
+        />
       </div>
 
       {/* Quick actions bar — appears when any block is selected. */}

@@ -82,3 +82,43 @@ export type DraftEvent =
     }
   | { type: "draft.op"; op: BlockOp; touched_block_id?: string }
   | { type: "draft.error"; message: string };
+
+// ----- Pre-publish review --------------------------------------------------
+
+export type ReviewKind = "legal" | "fact" | "links";
+
+export type ReviewSeverity = "info" | "warn" | "error";
+
+export interface ReviewFinding {
+  severity: ReviewSeverity;
+  message: string;
+  block_id?: string;
+  suggestion?: string;
+  suggested_link?: {
+    post_id: number;
+    anchor_text: string;
+    target_block_id?: string;
+  };
+}
+
+export type ReviewStatus =
+  | { state: "queued" }
+  | { state: "running"; started_at: number }
+  | {
+      state: "passed" | "warned" | "failed";
+      findings: ReviewFinding[];
+      finished_at: number;
+      duration_ms: number;
+    }
+  | { state: "error"; error: string; finished_at: number };
+
+export interface ReviewSnapshot {
+  content_hash: string;
+  results: Partial<Record<ReviewKind, ReviewStatus>>;
+}
+
+export type ReviewEvent =
+  | { type: "review.batch_started"; content_hash: string; results: ReviewSnapshot["results"] }
+  | { type: "review.kind_started"; kind: ReviewKind; status: ReviewStatus }
+  | { type: "review.kind_finished"; kind: ReviewKind; status: ReviewStatus }
+  | { type: "review.batch_finished"; content_hash: string; results: ReviewSnapshot["results"] };

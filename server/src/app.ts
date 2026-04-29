@@ -18,6 +18,12 @@ import {
 import { dispatchBlockTool } from "./agentBlockTools.js";
 import { getDraft, getDraftReady } from "./draftStore.js";
 import { buildDocState } from "./docState.js";
+import {
+  attachReviewListener,
+  getReviewSnapshot,
+  startReviewBatch,
+} from "./reviewOrchestrator.js";
+import type { ReviewKind } from "./reviewers.js";
 import { blocksToHtml, htmlToBlocks } from "./htmlBlocks.js";
 import type { PostMeta } from "./contract.js";
 
@@ -844,6 +850,50 @@ export function createApp(): Express {
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // ---------- Pre-publish review (legal / fact-check / internal links) ----
+
+  /** Kick off (or re-trigger) a review batch. Body: { kinds: string[] }. */
+  app.post("/api/sessions/:id/draft/review/start", writeLimit, async (req, res) => {
+    try {
+      const requested = (req.body?.kinds as string[]) || [];
+      const valid: ReviewKind[] = requested.filter((k): k is ReviewKind =>
+        ["legal", "fact", "links"].includes(k),
+      );
+      if (valid.length === 0)
+        return res.status(400).json({ error: "kinds[] required" });
+      const out = await startReviewBatch(req.params.id, valid);
+      res.json(out);
+    } catch (err: any) {
+      console.error("[review] start error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /** Snapshot of the current results for a parent session. */
+  app.get("/api/sessions/:id/draft/review", (req, res) => {
+    res.json(getReviewSnapshot(req.params.id));
+  });
+
+  /** SSE channel: review.batch_started / review.kind_started /
+   *  review.kind_finished / review.batch_finished events. */
+  app.get("/api/sessions/:id/draft/review/stream", (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders?.();
+    const detach = attachReviewListener(req.params.id, res);
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(": ping\n\n");
+      } catch {}
+    }, 15000);
+    req.on("close", () => {
+      detach();
+      clearInterval(heartbeat);
+    });
   });
 
   return app;
