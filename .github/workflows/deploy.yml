@@ -1,0 +1,146 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+      - "claude/bootstrap-project-BsFvC"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Setup SSH
+        env:
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          # printf preserves newlines correctly even if the secret has been re-encoded
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # Validate the key parses, fail fast otherwise
+          ssh-keygen -y -f ~/.ssh/id_ed25519 > ~/.ssh/id_ed25519.pub
+          echo "Public derived from private:"; cat ~/.ssh/id_ed25519.pub
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy
+        env:
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          BRANCH: ${{ github.ref_name }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          WP_BASE_URL: ${{ secrets.WP_BASE_URL }}
+          WP_USER_LOGIN: ${{ secrets.WP_USER_LOGIN }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          VPS_IP: ${{ secrets.VPS_IP }}
+          AUTH_USER: ${{ secrets.AUTH_USER }}
+          AUTH_PASS: ${{ secrets.AUTH_PASS }}
+        run: |
+          # On encode toutes les valeurs en base64 avant ssh pour éviter que
+          # le shell remote n'expande des sous-strings qui ressemblent à des
+          # variables (ex: \$2y\$05\$ d'un bcrypt hash devient \$0=bash + \$2,
+          # \$5 unset → "ybash5/..."). Le décodage sur la VPS est safe.
+          B64_ANTHROPIC=$(printf %s "$ANTHROPIC_API_KEY" | base64 -w0)
+          B64_WP_BASE=$(printf %s "$WP_BASE_URL" | base64 -w0)
+          B64_WP_USER=$(printf %s "$WP_USER_LOGIN" | base64 -w0)
+          B64_WP_PASS=$(printf %s "$WP_APP_PASSWORD" | base64 -w0)
+          B64_GEMINI=$(printf %s "$GEMINI_API_KEY" | base64 -w0)
+          B64_AUTH_USER=$(printf %s "$AUTH_USER" | base64 -w0)
+          B64_AUTH_PASS=$(printf %s "$AUTH_PASS" | base64 -w0)
+          ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 \
+            "$VPS_USER@$VPS_HOST" \
+            B64_ANTHROPIC="$B64_ANTHROPIC" \
+            B64_WP_BASE="$B64_WP_BASE" \
+            B64_WP_USER="$B64_WP_USER" \
+            B64_WP_PASS="$B64_WP_PASS" \
+            B64_GEMINI="$B64_GEMINI" \
+            B64_AUTH_USER="$B64_AUTH_USER" \
+            B64_AUTH_PASS="$B64_AUTH_PASS" \
+            VPS_IP="$VPS_IP" \
+            BRANCH="$BRANCH" \
+            bash -se <<'EOF'
+          set -euo pipefail
+          cd /opt/managed-agents
+          git fetch origin "$BRANCH"
+          git checkout "$BRANCH"
+          git reset --hard "origin/$BRANCH"
+          cd deploy
+          # Réécriture du .env depuis les secrets CI pour rester reproductible.
+          # On utilise printf au lieu d'un heredoc pour éviter que le shell
+          # remote interprète des séquences spéciales (notamment \$\$ comme PID
+          # de bash) dans les valeurs contenant des dollars (bcrypt hash etc).
+          umask 077
+          # Décode les valeurs base64 et écrit le .env en literal
+          : > .env
+          printf 'ANTHROPIC_API_KEY=%s\n' "$(echo "$B64_ANTHROPIC" | base64 -d)" >> .env
+          printf 'WP_BASE_URL=%s\n' "$(echo "$B64_WP_BASE" | base64 -d)" >> .env
+          printf 'WP_USER=%s\n' "$(echo "$B64_WP_USER" | base64 -d)" >> .env
+          printf 'WP_APP_PASSWORD=%s\n' "$(echo "$B64_WP_PASS" | base64 -d)" >> .env
+          printf 'GEMINI_API_KEY=%s\n' "$(echo "$B64_GEMINI" | base64 -d)" >> .env
+          printf 'VPS_IP=%s\n' "$VPS_IP" >> .env
+          printf 'AUTH_USER=%s\n' "$(echo "$B64_AUTH_USER" | base64 -d)" >> .env
+          printf 'AUTH_PASS=%s\n' "$(echo "$B64_AUTH_PASS" | base64 -d)" >> .env
+          # Volume persistant pour les drafts du block editor — survit aux
+          # redéploiements. Doit exister avant `up -d` car le bind mount
+          # serait créé avec mode 755 sinon. Idempotent.
+          mkdir -p /opt/managed-agents/data/drafts
+          chmod 700 /opt/managed-agents/data
+          docker compose -f docker-compose.local.yml --env-file .env up -d --build
+          # Restart Traefik pour qu'il sorte d'un éventuel panic loop sur du
+          # vieux config (notre middleware basicauth précédent l'a fait crasher).
+          # Le restart est idempotent: si Traefik est en bonne santé, c'est juste
+          # un reload de config sans impact (~2s downtime).
+          TRAEFIK=$(docker ps --format '{{.Names}}' | grep -i traefik | head -1)
+          if [ -n "$TRAEFIK" ]; then
+            echo "→ Restart $TRAEFIK pour reset config"
+            docker restart "$TRAEFIK" >/dev/null
+            sleep 3
+          fi
+          echo "→ Status:"
+          docker compose -f docker-compose.local.yml ps
+          echo "→ Traefik labels (server):"
+          docker inspect cms-lab-agent-server-1 \
+            --format '{{range $k, $v := .Config.Labels}}{{$k}}={{$v}}|{{end}}' 2>&1 | tr '|' '\n' | grep -E "middleware|users|router" | head -15 || true
+          echo "→ All running containers:"
+          docker ps --format '{{.Names}} {{.Image}}'
+          TRAEFIK=$(docker ps --format '{{.Names}}' | grep -i traefik | head -1)
+          echo "→ Traefik container: $TRAEFIK"
+          if [ -n "$TRAEFIK" ]; then
+            echo "→ Traefik full recent logs (last 50 lines):"
+            docker logs "$TRAEFIK" --tail 50 2>&1 || true
+            echo "→ Traefik HTTP routers via API:"
+            docker exec "$TRAEFIK" wget -qO- http://localhost:8080/api/http/routers 2>/dev/null | head -c 4000 || \
+              docker exec "$TRAEFIK" curl -sf http://localhost:8080/api/http/routers 2>/dev/null | head -c 4000 || \
+              echo "(traefik api not reachable)"
+          fi
+          EOF
+
+      - name: Smoke test
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          sleep 10
+          # /api/health est laissé public par notre middleware Express (pour
+          # monitoring), donc 200 attendu. /api/sessions doit retourner 401.
+          echo "→ Health (public): doit être 200"
+          code=$(curl -s -o /tmp/health.body -w "%{http_code}" --max-time 30 "https://agent.${VPS_HOST}.nip.io/api/health")
+          echo "HTTP $code"
+          cat /tmp/health.body
+          [ "$code" = "200" ] && grep -q '"ok":true' /tmp/health.body || { echo "✗ health check"; exit 1; }
+          echo "→ /api/sessions sans creds: doit être 401"
+          code=$(curl -s -o /tmp/sess.body -w "%{http_code}" --max-time 10 -X POST -H "Content-Type: application/json" -d '{}' "https://agent.${VPS_HOST}.nip.io/api/sessions")
+          echo "HTTP $code"
+          if [ "$code" = "401" ]; then
+            echo "✓ Auth Express actif"
+          else
+            echo "⚠ /api/sessions devrait être 401 sans auth (got $code)"
+          fi
