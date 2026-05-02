@@ -1,10 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import {
-  createSession,
-  sendMessage,
-  publishDraft,
-  fetchHealth,
-} from "./api";
+import { createSession, sendMessage, fetchHealth } from "./api";
 
 describe("createSession", () => {
   beforeEach(() => vi.restoreAllMocks());
@@ -51,38 +46,6 @@ describe("sendMessage", () => {
         method: "POST",
         body: JSON.stringify({ text: "hello", selection_block_ids: [] }),
       }),
-    );
-  });
-});
-
-describe("publishDraft", () => {
-  beforeEach(() => vi.restoreAllMocks());
-
-  it("POSTs to /api/wp/posts for create", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ id: 1 }),
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    await publishDraft({ action: "create", title: "x" });
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("/api/wp/posts");
-    expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body)).toEqual({ title: "x" });
-  });
-
-  it("PUTs to /api/wp/posts/:id for update", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
-    vi.stubGlobal("fetch", fetchMock);
-    await publishDraft({ action: "update", id: 9, title: "x" });
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("/api/wp/posts/9");
-    expect(init.method).toBe("PUT");
-  });
-
-  it("throws if update has no id", async () => {
-    await expect(publishDraft({ action: "update", title: "x" } as any)).rejects.toThrow(
-      /update requires id/,
     );
   });
 });

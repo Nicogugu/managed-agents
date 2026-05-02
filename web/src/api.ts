@@ -1,5 +1,3 @@
-import type { WpDraft } from "./types";
-
 async function readError(res: Response): Promise<string> {
   try {
     const data = await res.json();
@@ -62,28 +60,7 @@ export async function interrupt(sessionId: string) {
   await fetch(`/api/sessions/${sessionId}/interrupt`, { method: "POST" });
 }
 
-export async function publishDraft(draft: WpDraft) {
-  const { action, id, ...payload } = draft;
-  if (action === "update") {
-    if (!id) throw new Error("update requires id");
-    const res = await fetch(`/api/wp/posts/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw new Error(`WP update failed: ${await res.text()}`);
-    return res.json();
-  }
-  const res = await fetch(`/api/wp/posts`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error(`WP create failed: ${await res.text()}`);
-  return res.json();
-}
-
-// ----- Block editor (v2) draft endpoints --------------------------------
+// ----- Block editor draft endpoints -------------------------------------
 
 export async function publishCurrentDraft(
   sessionId: string,

@@ -1,28 +1,9 @@
-import type { WpDraft, WpPlan, TodoItem, WpAsk } from "./types";
+import type { WpPlan, TodoItem, WpAsk } from "./types";
 
-const POST_RE = /```wp-post\s*\n([\s\S]*?)```/g;
 const PLAN_RE = /```wp-plan\s*\n([\s\S]*?)```/g;
 const TODOS_RE = /```todos\s*\n([\s\S]*?)```/g;
 const ASK_RE = /```ask\s*\n([\s\S]*?)```/g;
-// Liste markdown libre: - [x|-| ] texte
 const LOOSE_TODO_LINE = /^[ \t]*-[ \t]+\[([ x\-X])\][ \t]+(.+)$/;
-
-export function extractDrafts(text: string): WpDraft[] {
-  const drafts: WpDraft[] = [];
-  let m: RegExpExecArray | null;
-  POST_RE.lastIndex = 0;
-  while ((m = POST_RE.exec(text)) !== null) {
-    try {
-      const parsed = JSON.parse(m[1].trim());
-      if (parsed && (parsed.action === "create" || parsed.action === "update")) {
-        drafts.push(parsed);
-      }
-    } catch {
-      // ignore invalid JSON; agent will retry
-    }
-  }
-  return drafts;
-}
 
 export function extractPlans(text: string): WpPlan[] {
   const plans: WpPlan[] = [];
@@ -40,7 +21,6 @@ export function extractPlans(text: string): WpPlan[] {
 }
 
 export function extractTodos(text: string): TodoItem[] {
-  // Priorité: bloc ```todos```. Fallback: lignes "- [ ] ..." dans le texte libre.
   TODOS_RE.lastIndex = 0;
   const m = TODOS_RE.exec(text);
   const block = m ? m[1] : null;
@@ -85,15 +65,6 @@ export function extractAsks(text: string): WpAsk[] {
   return asks;
 }
 
-// Returns the text with wp-post / wp-plan / todos / ask fences stripped (for clean bubble rendering).
 export function stripBlocks(text: string): string {
-  return text
-    .replace(POST_RE, "")
-    .replace(PLAN_RE, "")
-    .replace(TODOS_RE, "")
-    .replace(ASK_RE, "")
-    .trim();
+  return text.replace(PLAN_RE, "").replace(TODOS_RE, "").replace(ASK_RE, "").trim();
 }
-
-// Backwards-compat alias used by existing callers
-export const stripDraftFences = stripBlocks;

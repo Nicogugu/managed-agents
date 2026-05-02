@@ -150,8 +150,7 @@ async function dispatchCustomTool(
     } else if (name === "wp_publish") {
       const action = input.action;
       const { action: _a, id: postId, ...payload } = input;
-      // Status par défaut: publish (l'agent ne devrait pas appeler wp_publish
-      // sinon — pour les drafts l'agent émet un bloc wp-post)
+      // Status par défaut: publish (wp_publish est un raccourci direct WP).
       const post: any = { status: "publish", ...payload };
       let result: any;
       if (action === "update") {

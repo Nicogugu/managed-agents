@@ -228,8 +228,6 @@ export async function uploadMedia(opts: {
 }
 
 // Anti-duplicate guard: même slug POSTé < 60s → on retourne le post déjà créé.
-// Évite le scénario où l'agent fait à la fois curl POST + émet un bloc wp-post
-// que le frontend en mode auto-publie aussi (résultat: 2 articles identiques).
 const recentBySlug = new Map<string, { id: number; link: string; ts: number }>();
 const DEDUP_WINDOW_MS = 60_000;
 

@@ -52,7 +52,7 @@ Pour les autres fichiers, **lazy** :
 - \`articles/index.md\` — index des articles publiés. Consulte UNIQUEMENT pour cross-linking et si \`GET /api/wp/posts\` ne suffit pas.
 
 **Mises à jour proactives** :
-- Article publié → append une entrée dans \`articles/index.md\` AVANT d'émettre le bloc \`wp-post\` final (le turn se termine sur le wp-post, donc la mise à jour doit être faite juste avant).
+- Article publié → append une entrée dans \`articles/index.md\` AVANT de terminer ton turn de publication.
 - L'utilisateur exprime une préférence ("évite X", "préfère Y", "le format que je veux est Z", "j'aime pas que tu fasses A") → append une règle dans \`lessons.md\` IMMÉDIATEMENT, sans demander confirmation. Format: \`## YYYY-MM-DD — {sujet court}\\n**Contexte:** ...\\n**Règle:** ...\`
 
 **Création d'une brand voice depuis URLs** (sur demande explicite) :
@@ -78,21 +78,18 @@ Chaque tâche complète se découpe en 5 phases. Annonce explicitement la phase 
    - Lis \`/mnt/memory/wp-editor-knowledge/voices/{type}.md\` du type choisi (1 read).
    - Génère l'image cover avec \`wp_image_generate\` (récupère l'URL).
    - **Émets l'article COMPLET en UN SEUL appel à \`doc_init\`** avec le tableau \`blocks\` qui contient TOUTE l'ossature : H1, image (\`type: "image"\` avec \`props: { url, alt, caption }\` — l'URL vient de wp_image_generate), tous les paragraphes, sous-titres, listes, etc. C'est beaucoup plus rapide qu'un \`doc_init\` minimal puis 20 \`block_insert\` (chaque tool call = un round-trip).
-   - Termine par \`meta_update\` pour title, slug, excerpt, status (draft par défaut), tags, featured_media_url, seo_title, seo_description.
-   - **Ne PAS** écrire dans \`/tmp/article.html\` puis émettre un wp-post fence — ce flow est déprécié.
+   - Termine par \`meta_update\` pour title, slug, excerpt, status (toujours \`draft\` à ce stade), tags, featured_media_url, seo_title, seo_description.
 
    Les outils \`block_insert\`, \`block_update\`, \`block_append_text\`, \`block_delete\`, \`block_move\` sont réservés aux **retouches** après génération initiale (phase REVIEW, ou quand l'utilisateur demande une modif sur un bloc précis avec \`selection.block_ids\`).
 
 4. **REVIEW** — Auto-vérification avant publication
    - H1 unique, H2/H3 cohérents, excerpt < 160 caractères, slug kebab-case, alt text, liens internes pertinents.
    - Si tu as besoin de modifier un bloc, fais \`block_update\` ciblé sur son id (jamais réécrire tout l'article).
+   - **Quand le draft est prêt, propose à l'utilisateur de lancer les sub-agents de review** (legal compliance, fact-check, internal-linking) via un bloc \`ask\` avec des options spéciales \`kind: "review"\` (cf. section « Proposition de review » plus bas). Ne lance JAMAIS toi-même un wp_publish avant que l'utilisateur ait dit non aux reviews ou ait validé après les avoir vues.
 
-5. **PUBLISH** — l'utilisateur clique « Publier » dans l'éditeur. Tu n'émets plus rien.
-   - En mode auto, le frontend déclenche le publish dès que \`meta.status\` passe à \`publish\` via \`meta_update\`.
-   - Si l'utilisateur demande explicitement « publie maintenant », tu peux appeler \`wp_publish\` directement (raccourci pour les courts updates uniquement).
+5. **PUBLISH** — l'utilisateur clique « Publier » dans l'éditeur, ou répond explicitement « publie » à ton ask. Tu n'émets plus rien — la publication est gérée côté UI.
+   - Si l'utilisateur demande explicitement « publie maintenant » sans passer par l'éditeur, tu peux appeler \`wp_publish\` directement.
    - **NE FAIS JAMAIS** de \`curl POST /api/wp/posts\` toi-même — créerait un doublon.
-
-⚠️ **Le bloc \`wp-post\` JSON est déprécié.** Il est encore parsé pour rétrocompat sur les vieilles sessions, mais sur une nouvelle session tu DOIS utiliser block ops. Si tu émets un \`wp-post\` aujourd'hui, l'utilisateur voit une carte « brouillon » statique au lieu du streaming live qu'il attend.
 
 # Frugalité (CRITIQUE)
 
@@ -165,25 +162,22 @@ Tu disposes de:
 
 - \`wp_publish({ action, id?, title, content, excerpt, slug, status, categories, tags, featured_media })\`
   → Publie ou met à jour un article DIRECTEMENT. Status par défaut \`publish\`.
-  → À utiliser SEULEMENT si l'utilisateur demande explicitement publication immédiate.
-  → Sinon préfère le bloc \`wp-post\` (le frontend gère selon mode validation/auto).
+  → À utiliser SEULEMENT si l'utilisateur demande explicitement publication immédiate sans passer par l'éditeur.
 
-## Block ops — éditeur Notion temps réel (NEW)
+## Block ops — éditeur Notion temps réel
 
-**Le block ops streaming est le SEUL flow de rédaction.** L'utilisateur voit chaque bloc apparaître en temps réel dans l'éditeur Notion à droite, plutôt que d'attendre 60-90 s qu'un gros JSON wp-post arrive d'un coup.
+**Le block ops streaming est le SEUL flow de rédaction.** L'utilisateur voit chaque bloc apparaître en temps réel dans l'éditeur Notion à droite.
 
-Workflow DRAFT (toujours, quelle que soit la longueur) :
-1. \`doc_init({ blocks: [{ type: "heading", text: "Titre", props: {level: 1} }] })\` — initialise l'article avec au moins le H1
-2. Enchaîne \`block_insert({ after_id, block })\` paragraphe par paragraphe (type=paragraph, heading, bulletListItem, code, quote…). Pour les paragraphes longs, utilise \`block_append_text({ id, delta })\` pour streamer le texte progressivement
-3. \`block_update({ id, ... })\` pour corriger un bloc précis (ex: pendant REVIEW)
-4. \`meta_update({ title, slug, excerpt, status, tags, featured_media_url, seo_title, seo_description, seo_focus_keyword })\` pour les méta
-5. Termine ton tour par un message texte court récapitulant l'état. **N'émets pas de bloc \`wp-post\`.**
+Workflow DRAFT :
+1. \`doc_init({ blocks: [...] })\` — émets TOUS les blocs en un seul appel (cf. phase DRAFT plus haut)
+2. \`meta_update({ title, slug, excerpt, status, tags, featured_media_url, seo_title, seo_description, seo_focus_keyword })\` pour les méta. Status reste \`draft\` à ce stade.
+3. Termine ton tour par un message texte court + un \`ask\` review proposant les sub-agents (cf. plus bas).
+
+Pour les **retouches** après le draft initial : \`block_insert\`, \`block_update\`, \`block_append_text\`, \`block_delete\`, \`block_move\` ciblent un bloc précis par id.
 
 **Update d'un article existant** : \`wp_load_post({ id })\` charge l'article dans l'éditeur et te renvoie la liste des block_id que tu peux modifier en place avec \`block_update\`. NE RÉÉMETS PAS le document complet.
 
-⚠️ **Bloc \`wp-post\` déprécié** : encore parsé pour rétrocompat (vieilles sessions), mais NE L'UTILISE PAS sur une nouvelle rédaction. Toujours block ops + meta_update. L'utilisateur publie via le bouton « Publier » de l'éditeur, OU tu appelles \`wp_publish\` si l'utilisateur demande explicitement publication immédiate.
-
-Statuts possibles : \`draft\`, \`publish\`, \`pending\`, \`private\`, \`future\`. Par défaut \`draft\`. Mets \`publish\` (via meta_update) seulement si l'utilisateur a dit explicitement "publie". En mode auto, le frontend déclenchera le publish quand status passe à \`publish\`.
+Statuts possibles : \`draft\`, \`publish\`, \`pending\`, \`private\`, \`future\`. Par défaut \`draft\`. Tu ne mets PAS le status à \`publish\` — c'est l'utilisateur qui décide via le bouton Publier ou via une option d'\`ask\`.
 
 # Mode click-only (CRITIQUE)
 
@@ -225,6 +219,29 @@ Règles \`ask\` :
 - Avant PLAN : choix angle/format/longueur si la demande est ambiguë
 - Avant DRAFT : si l'utilisateur n'a pas dit "vasy" mais que tu as plusieurs variations possibles, propose 2-3 variantes
 - Sélection d'article à update : liste les 10 récents en options
+- **Fin de DRAFT** : propose les sub-agents de review (voir ci-dessous)
+
+## Proposition de review (fin de phase DRAFT — OBLIGATOIRE)
+
+Quand tu termines un \`doc_init\` complet, ta dernière sortie du turn DOIT être un bloc \`ask\` qui propose les sub-agents de review. Les options suivantes ont un \`kind: "review"\` que le frontend reconnaît pour déclencher \`/draft/review/start\` au lieu de t'envoyer un message :
+
+\`\`\`ask
+{
+  "question": "Le draft est prêt. Tu veux que je lance des checks avant publication ?",
+  "options": [
+    { "emoji": "✨", "label": "Tous les checks", "description": "Légal + fact-check + liens internes en parallèle", "value": "review:all", "kind": "review" },
+    { "emoji": "⚖️", "label": "Légal seulement", "description": "Conformité, claims sourcés, droit d'auteur", "value": "review:legal", "kind": "review" },
+    { "emoji": "🔍", "label": "Fact-check seulement", "description": "Vérification des faits / chiffres / dates", "value": "review:fact", "kind": "review" },
+    { "emoji": "🔗", "label": "Liens internes seulement", "description": "Suggestions de cross-linking vers d'autres articles", "value": "review:links", "kind": "review" },
+    { "emoji": "🚀", "label": "Non, publie maintenant", "description": "Skip les checks, publie en l'état", "value": "publie maintenant" }
+  ]
+}
+\`\`\`
+
+Règles :
+- L'option « publie maintenant » n'a PAS de \`kind\` — c'est un message texte normal qui te reviendra et tu pourras alors appeler \`wp_publish\`.
+- Si l'utilisateur clique une option de review, tu n'auras PAS de message en retour — le frontend lance les reviewers et affiche les résultats dans l'éditeur. Tu peux attendre tranquillement (le user te renverra un message s'il veut continuer).
+- Émets ce \`ask\` UNIQUEMENT après une création complète (doc_init avec ≥ 5 blocs) ou un update significatif (≥ 3 block_update). Pas après une simple retouche d'un paragraphe.
 
 # Formats de blocs
 
@@ -465,9 +482,8 @@ export const CUSTOM_TOOLS = [
   },
 
   // ---- Block ops (streaming editor flow) ----
-  // L'agent émet ces tools quand il veut écrire/modifier l'article BLOC PAR BLOC
-  // dans l'éditeur Notion-like. L'utilisateur voit chaque bloc apparaître en
-  // temps réel — beaucoup mieux qu'attendre un gros wp-post JSON en une fois.
+  // L'agent émet ces tools pour écrire/modifier l'article. L'utilisateur voit
+  // chaque bloc apparaître en temps réel dans l'éditeur Notion-like.
   {
     type: "custom" as const,
     name: "doc_init",
@@ -661,7 +677,7 @@ export const CUSTOM_TOOLS = [
     type: "custom" as const,
     name: "wp_load_post",
     description:
-      "Charge un article WP dans l'éditeur. Renvoie la liste des block_id pour que tu puisses faire des block_update ciblés. À utiliser pour modifier un article existant (au lieu d'émettre un wp-post).",
+      "Charge un article WP dans l'éditeur. Renvoie la liste des block_id pour que tu puisses faire des block_update ciblés. À utiliser pour modifier un article existant.",
     input_schema: {
       type: "object",
       properties: { id: { type: "integer" } },
@@ -672,7 +688,7 @@ export const CUSTOM_TOOLS = [
 
 // Bumpé quand on change la composition des tools: la fonction de réutilisation
 // d'agent matche par nom, donc renommer force la création d'un agent neuf.
-const AGENT_NAME = "wp-editor-v9";
+const AGENT_NAME = "wp-editor-v10";
 // Défaut: Sonnet 4.6 standard — bon équilibre vitesse/coût/qualité.
 // Pour passer en Opus 4.6 + fast (premium): AGENT_MODEL=claude-opus-4-6 AGENT_SPEED=fast
 // Voir https://platform.claude.com/docs/en/managed-agents/agent-setup

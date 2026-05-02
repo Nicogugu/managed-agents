@@ -1,81 +1,52 @@
 import { describe, it, expect } from "vitest";
-import { extractDrafts, stripDraftFences } from "./parseDraft";
+import { extractAsks, extractPlans, extractTodos, stripBlocks } from "./parseDraft";
 
-describe("extractDrafts", () => {
-  it("extracts a single create draft", () => {
-    const text = `Voici l'article :
-\`\`\`wp-post
-{"action":"create","title":"Hello","content":"<p>Hi</p>","status":"draft"}
-\`\`\`
-Dis-moi si ça te va.`;
-    const drafts = extractDrafts(text);
-    expect(drafts).toHaveLength(1);
-    expect(drafts[0]).toMatchObject({
-      action: "create",
-      title: "Hello",
-      content: "<p>Hi</p>",
-      status: "draft",
-    });
-  });
-
-  it("extracts an update draft with id", () => {
-    const text = `\`\`\`wp-post
-{"action":"update","id":42,"title":"Updated"}
+describe("extractAsks", () => {
+  it("parses an ask block", () => {
+    const text = `\`\`\`ask
+{"question":"Choisis","options":[{"label":"A","value":"a"}]}
 \`\`\``;
-    const drafts = extractDrafts(text);
-    expect(drafts[0]).toMatchObject({ action: "update", id: 42 });
+    const asks = extractAsks(text);
+    expect(asks).toHaveLength(1);
+    expect(asks[0].options[0]).toMatchObject({ label: "A", value: "a" });
   });
 
-  it("extracts multiple drafts", () => {
-    const text = `
-\`\`\`wp-post
-{"action":"create","title":"A"}
-\`\`\`
-some text
-\`\`\`wp-post
-{"action":"create","title":"B"}
-\`\`\`
-`;
-    expect(extractDrafts(text)).toHaveLength(2);
-  });
-
-  it("ignores invalid JSON without throwing", () => {
-    const text = `\`\`\`wp-post
-not-json
-\`\`\``;
-    expect(extractDrafts(text)).toEqual([]);
-  });
-
-  it("ignores blocks without action create/update", () => {
-    const text = `\`\`\`wp-post
-{"action":"delete","id":1}
-\`\`\``;
-    expect(extractDrafts(text)).toEqual([]);
-  });
-
-  it("ignores other code fence languages", () => {
-    const text = `\`\`\`json
-{"action":"create","title":"x"}
-\`\`\``;
-    expect(extractDrafts(text)).toEqual([]);
+  it("ignores invalid JSON", () => {
+    expect(extractAsks("```ask\nnope\n```")).toEqual([]);
   });
 });
 
-describe("stripDraftFences", () => {
-  it("removes wp-post blocks but keeps surrounding prose", () => {
-    const text = `Avant
-\`\`\`wp-post
-{"action":"create","title":"x"}
-\`\`\`
-Après`;
-    const stripped = stripDraftFences(text);
-    expect(stripped).toContain("Avant");
-    expect(stripped).toContain("Après");
-    expect(stripped).not.toContain("wp-post");
-    expect(stripped).not.toContain("action");
+describe("extractPlans", () => {
+  it("parses a wp-plan", () => {
+    const text = `\`\`\`wp-plan
+{"title":"x","outline":["a","b"]}
+\`\`\``;
+    expect(extractPlans(text)[0]).toMatchObject({ title: "x" });
+  });
+});
+
+describe("extractTodos", () => {
+  it("parses a todos block", () => {
+    const text = `\`\`\`todos
+- [ ] open
+- [x] done
+- [-] doing
+\`\`\``;
+    const todos = extractTodos(text);
+    expect(todos.map((t) => t.status)).toEqual(["pending", "done", "in_progress"]);
   });
 
-  it("returns text unchanged if no fence", () => {
-    expect(stripDraftFences("hello world")).toBe("hello world");
+  it("falls back to free-text checklist", () => {
+    expect(extractTodos("- [ ] write\n- [x] ship")).toHaveLength(2);
+  });
+});
+
+describe("stripBlocks", () => {
+  it("removes wp-plan / todos / ask fences", () => {
+    const text = `before\n\`\`\`ask\n{"options":[{"label":"a","value":"a"}]}\n\`\`\`\nafter`;
+    const out = stripBlocks(text);
+    expect(out).toContain("before");
+    expect(out).toContain("after");
+    expect(out).not.toContain("ask");
   });
 });

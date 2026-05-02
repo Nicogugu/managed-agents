@@ -16,11 +16,6 @@ import {
 
 interface Props {
   sessionId: string | null;
-  /** Optional seed when the user clicks "Edit inline" on a wp-post DraftCard. */
-  seedHtml?: string | null;
-  /** "auto" → publish automatically when meta.status flips to "publish" via
-   *  an agent meta_update. "validate" → user must click the Publish button. */
-  mode?: "auto" | "validate";
   /** Block ids the agent is currently working on — receive a shimmer in
    *  the editor until the agent goes idle. Cleared by the parent. */
   pendingAgentBlockIds?: string[];
@@ -37,18 +32,12 @@ interface Props {
 
 /**
  * Right-pane block editor surface. Renders the BlockNote editor plus a
- * meta sidebar (title / slug / excerpt / status / tags / SEO), a review
- * badge bar, and a Cmd+K menu wired to send selection-scoped prompts to
- * the agent.
- *
- * The editor is hydrated by:
- * - the agent (via block_* tools → SSE draft.* events), and/or
- * - a `seedHtml` if the user clicked "Edit inline" on a wp-post DraftCard.
+ * meta sidebar (slug / excerpt / tags / SEO) and a Cmd+K menu wired to
+ * send selection-scoped prompts to the agent. The agent mutates the doc
+ * via block_* tools → SSE draft.* events.
  */
 export function EditorPane({
   sessionId,
-  seedHtml,
-  mode = "validate",
   pendingAgentBlockIds,
   onClose,
   onPublished,
@@ -171,27 +160,6 @@ export function EditorPane({
       editorHandle.setBlocks([...blocks, b]);
     }
   }
-
-  // Auto-publish: in "auto" mode, when the agent flips meta.status to a
-  // publish-like value via meta_update, publish automatically. We track the
-  // last meta we published for so a subsequent edit can re-publish (the
-  // agent could update + re-publish the same post). Only triggers on
-  // transitions, not on the initial snapshot.
-  const lastAutoPublishedRef = useRef<string>("");
-  useEffect(() => {
-    if (mode !== "auto") return;
-    if (!sessionId) return;
-    if (busy) return;
-    const triggerable = ["publish", "future"].includes(meta.status);
-    if (!triggerable) return;
-    if (!meta.title?.trim()) return; // no point auto-publishing an untitled doc
-    // Hash on (post_id || "new") + status + title — re-trigger when any
-    // changes meaningfully (e.g. user/agent updates and re-flips to publish)
-    const key = `${meta.post_id || "new"}|${meta.status}|${meta.title}`;
-    if (key === lastAutoPublishedRef.current) return;
-    lastAutoPublishedRef.current = key;
-    void publish(meta.status);
-  }, [meta.status, meta.title, meta.post_id, mode, sessionId, busy]);
 
   async function publish(status?: string) {
     if (!sessionId) return;
@@ -437,38 +405,9 @@ export function EditorPane({
         </div>
       )}
 
-      {/* Featured image banner. Shown when meta.featured_media_url is set
-          but the agent forgot to also insert a corresponding block image
-          inside the doc — at least the user sees it. */}
-      {meta.featured_media_url &&
-        !currentBlocks.some(
-          (b) =>
-            b.type === "image" &&
-            (b.props as any)?.url === meta.featured_media_url,
-        ) && (
-          <div className="px-3 pt-2 flex-shrink-0">
-            <div className="surface rounded-md flex items-center gap-2 p-2 text-xs">
-              <img
-                src={meta.featured_media_url}
-                alt=""
-                className="h-12 w-20 rounded border border-border object-cover"
-              />
-              <div className="flex-1 min-w-0">
-                <div className="text-text-tertiary uppercase tracking-wide">
-                  Image à la une
-                </div>
-                <div className="text-text-muted truncate font-mono text-[11px]">
-                  {meta.featured_media_url}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
       <div className="flex-1 min-h-0 flex">
         <InlineEditor
           sessionId={sessionId}
-          seedHtml={seedHtml}
           onMetaSnapshot={onSnapshotMeta}
           onBlockMeta={onSnapshotBlockMeta}
           onMetaPatch={(patch) => {

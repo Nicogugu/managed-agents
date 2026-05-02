@@ -1,5 +1,3 @@
-import type { Mode } from "../types";
-
 type Health = { ok: boolean; anthropicKey: boolean; wpConfigured: boolean };
 type Status = "idle" | "running" | "connecting";
 
@@ -7,24 +5,30 @@ export function Header({
   sessionId,
   status,
   health,
-  mode,
   stalled,
-  onModeChange,
   onNewSession,
   onReconnect,
+  onOpenMeta,
+  metaActive,
+  onPublish,
+  publishLabel,
+  publishDisabled,
 }: {
   sessionId: string | null;
   status: Status;
   health: Health | null;
-  mode: Mode;
   stalled?: boolean;
-  onModeChange: (m: Mode) => void;
   onNewSession: () => void;
   onReconnect?: () => void;
+  onOpenMeta?: () => void;
+  metaActive?: boolean;
+  onPublish?: () => void;
+  publishLabel?: string;
+  publishDisabled?: boolean;
 }) {
   return (
     <header className="border-b border-border bg-bg-primary/80 backdrop-blur-md sticky top-0 z-10">
-      <div className="max-w-3xl mx-auto flex items-center justify-between gap-3 px-4 sm:px-6 h-12">
+      <div className="mx-auto flex items-center justify-between gap-3 px-4 sm:px-6 h-12 max-w-[1400px]">
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-5 h-5 rounded bg-accent/20 border border-accent/30 flex items-center justify-center flex-shrink-0">
             <span className="text-accent text-[10px] font-bold">W</span>
@@ -47,21 +51,49 @@ export function Header({
               no key
             </span>
           )}
+          {sessionId && (
+            <span className="text-[11px] text-text-muted font-mono truncate hidden md:inline ml-2">
+              {sessionId}
+            </span>
+          )}
         </div>
-        <ModeToggle mode={mode} onChange={onModeChange} />
+        <div className="flex items-center gap-2">
+          {sessionId && (
+            <button
+              type="button"
+              onClick={onNewSession}
+              className="text-xs text-text-muted hover:text-text-primary border border-transparent hover:border-border rounded-md px-2 py-1"
+              title="Démarrer une nouvelle session"
+            >
+              ＋ Nouvelle
+            </button>
+          )}
+          {onOpenMeta && (
+            <button
+              type="button"
+              onClick={onOpenMeta}
+              className={`text-xs rounded-md px-2 py-1 border ${
+                metaActive
+                  ? "border-accent/40 text-accent bg-accent/10"
+                  : "border-border text-text-tertiary hover:text-text-primary"
+              }`}
+              title="Slug, extrait, catégories, tags, SEO"
+            >
+              ⚙ Méta
+            </button>
+          )}
+          {onPublish && (
+            <button
+              type="button"
+              onClick={onPublish}
+              disabled={publishDisabled}
+              className="btn-primary !py-1 !px-3 text-xs"
+            >
+              {publishLabel || "Publier"}
+            </button>
+          )}
+        </div>
       </div>
-      {sessionId && (
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 pb-2 flex items-center justify-between gap-2">
-          <span className="text-xs text-text-muted font-mono truncate">{sessionId}</span>
-          <button
-            type="button"
-            onClick={onNewSession}
-            className="text-xs text-text-muted hover:text-text-secondary underline flex-shrink-0"
-          >
-            ＋ nouvelle session
-          </button>
-        </div>
-      )}
     </header>
   );
 }
@@ -77,32 +109,5 @@ function StatusDot({ status }: { status: Status }) {
       <span className={`w-1.5 h-1.5 rounded-full ${config.color} ${config.glow}`} />
       <span>{config.label}</span>
     </span>
-  );
-}
-
-function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => void }) {
-  return (
-    <div className="inline-flex bg-bg-tertiary border border-border rounded-md p-0.5 text-xs">
-      <button
-        onClick={() => onChange("validate")}
-        className={`px-2 sm:px-3 py-1 rounded transition-colors ${
-          mode === "validate"
-            ? "bg-bg-elevated text-text-primary shadow-sm"
-            : "text-text-tertiary hover:text-text-secondary"
-        }`}
-      >
-        Validation
-      </button>
-      <button
-        onClick={() => onChange("auto")}
-        className={`px-2 sm:px-3 py-1 rounded transition-colors ${
-          mode === "auto"
-            ? "bg-bg-elevated text-text-primary shadow-sm"
-            : "text-text-tertiary hover:text-text-secondary"
-        }`}
-      >
-        Auto-publish
-      </button>
-    </div>
   );
 }

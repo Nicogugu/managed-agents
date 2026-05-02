@@ -1,17 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "./useSession";
-import { sendMessage, publishDraft, fetchHealth } from "./api";
-import { extractDrafts, extractTodos } from "./parseDraft";
-import { PublishEditor } from "./components/PublishEditor";
+import { sendMessage, fetchHealth } from "./api";
+import { extractTodos } from "./parseDraft";
 import { EditorPane } from "./components/editor/EditorPane";
 import { useDraftAutoOpen } from "./lib/useDraftAutoOpen";
-import {
-  type Mode,
-  type PublishState,
-  type WpDraft,
-  assistantText,
-  assistantToolCalls,
-} from "./types";
+import { assistantText, assistantToolCalls } from "./types";
 import { friendlyLabel, summarizeToolForLine, toolIconChar } from "./lib/toolLabels";
 import { Header } from "./components/Header";
 import { EmptyState } from "./components/EmptyState";
@@ -26,13 +19,10 @@ type Health = { ok: boolean; anthropicKey: boolean; wpConfigured: boolean };
 export function App() {
   const { sessionId, messages, status, error, lastEventAt, appendUserMessage, newSession, reconnect } = useSession();
   // Watchdog: if the agent is supposedly running but hasn't emitted any
-  // SSE event for >20 s, flag the stream as likely stalled (mobile radio
-  // sleep, server pump crashed, Anthropic SSE drop). The Header surfaces
-  // a "Reconnecter" button instead of the regular status pill.
+  // SSE event for >20 s, flag the stream as likely stalled.
   const stalled =
     status === "running" && lastEventAt > 0 && Date.now() - lastEventAt > 20_000;
   const [editorOpen, setEditorOpen] = useState(false);
-  const [editorSeed, setEditorSeed] = useState<string | null>(null);
   const draftAuto = useDraftAutoOpen(sessionId);
   useEffect(() => {
     if (draftAuto.shouldOpen && !editorOpen) setEditorOpen(true);
@@ -109,33 +99,14 @@ export function App() {
 
   const [todosOpen, setTodosOpen] = useState(false);
 
-  // ------- Mode + askAnswered + publishedDrafts -----------------------------
-  const [mode, setMode] = useState<Mode>(() => {
-    if (typeof localStorage === "undefined") return "auto";
-    const saved = localStorage.getItem("mode");
-    return saved === "validate" || saved === "auto" ? saved : "auto";
-  });
-  useEffect(() => {
-    if (typeof localStorage !== "undefined") localStorage.setItem("mode", mode);
-  }, [mode]);
-
   const [askAnswered, setAskAnswered] = useState<Record<string, string>>({});
-  const [pendingDraft, setPendingDraft] = useState<WpDraft | null>(null);
   const [toast, setToast] = useState<{ text: string; link?: string } | null>(null);
-  const [publishedDrafts, setPublishedDrafts] = useState<Record<string, PublishState>>({});
   const [health, setHealth] = useState<Health | null>(null);
-  const handledDrafts = useRef<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchHealth().then(setHealth).catch(() => {});
   }, []);
-
-  // Note: auto-publish in this branch is now handled inside EditorPane
-  // (watches the editor's meta.status). The legacy wp-post fence flow is
-  // deprecated — the agent emits block ops + meta_update instead. We still
-  // render historical DraftCards (extractDrafts) so old sessions remain
-  // readable, but we don't auto-publish them.
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -150,10 +121,6 @@ export function App() {
   // ------- Editor selection (shared with sendMessage so DOC_STATE.selection
   //         always reflects what the user has highlighted in the editor) ----
   const editorSelectionIds = useRef<string[]>([]);
-  // Block ids the agent is currently working on (e.g. user clicked "Reformuler"
-  // on this paragraph or typed a prompt with a selection). Cleared when the
-  // agent goes idle. Used by the editor to show a per-block shimmer while
-  // the agent is processing.
   const [pendingAgentBlockIds, setPendingAgentBlockIds] = useState<string[]>([]);
   useEffect(() => {
     if (status === "idle") setPendingAgentBlockIds([]);
@@ -204,10 +171,8 @@ export function App() {
         sessionId={sessionId}
         status={status}
         health={health}
-        mode={mode}
         stalled={stalled}
         onReconnect={reconnect}
-        onModeChange={setMode}
         onNewSession={() => {
           if (
             messages.length === 0 ||
@@ -216,12 +181,7 @@ export function App() {
             )
           ) {
             setAskAnswered({});
-            handledDrafts.current = new Set();
-            setPublishedDrafts({});
-            // Reset editor-related state so the new session truly starts
-            // empty even on the right-pane.
             setEditorOpen(false);
-            setEditorSeed(null);
             editorSelectionIds.current = [];
             draftAuto.reset();
             void newSession();
@@ -238,14 +198,6 @@ export function App() {
         />
       )}
 
-      {/* Layout: chat + editor in a flex row. The editor is ALWAYS mounted
-          once a session exists (just hidden via CSS when closed) so the
-          BlockNote instance keeps its state and the SSE consumer keeps
-          applying agent ops in real time even while not visible.
-          - md+ (>=768px, includes phones in landscape): split — chat
-            shrinks to ~320-450px, editor takes the rest
-          - portrait phone (<768px): chat full-width when closed, fully
-            hidden when editor open (editor takes the full screen). */}
       <div className="flex-1 min-h-0 flex">
       <main
         ref={scrollRef}
@@ -275,13 +227,10 @@ export function App() {
             <MessageBubble
               key={m.id}
               message={m}
-              mode={mode}
-              onPublish={(draft) => setPendingDraft(draft)}
               onAnswerAsk={(askIdx, label, value) =>
                 answerAsk(`${m.id}#${askIdx}`, label, value)
               }
               askAnsweredFor={(askIdx) => askAnswered[`${m.id}#${askIdx}`]}
-              publishedFor={(draftIdx) => publishedDrafts[`${m.id}#${draftIdx}`]}
               onApprovePlan={() => sendClick("✓ vasy", "vasy")}
               disabled={false}
             />
@@ -310,12 +259,9 @@ export function App() {
         >
           <EditorPane
             sessionId={sessionId}
-            seedHtml={editorSeed}
-            mode={mode}
             pendingAgentBlockIds={pendingAgentBlockIds}
             onClose={() => {
               setEditorOpen(false);
-              setEditorSeed(null);
               draftAuto.reset();
             }}
             onPublished={(p) => {
@@ -332,38 +278,6 @@ export function App() {
       </div>
 
       <ChatInput sessionId={sessionId} onSend={sendText} />
-
-      {pendingDraft && (
-        <PublishEditor
-          draft={pendingDraft}
-          onClose={() => setPendingDraft(null)}
-          onPublished={(post) => {
-            setPendingDraft(null);
-            setToast({
-              text: `Publié · ${pendingDraft.title?.slice(0, 50) || `#${post.id}`}`,
-              link: post.link,
-            });
-            // Trouve la draft card pour la mettre à jour avec le lien
-            for (let mi = messages.length - 1; mi >= 0; mi--) {
-              const m = messages[mi];
-              if (m.role !== "assistant") continue;
-              const drafts = extractDrafts(assistantText(m));
-              for (let di = 0; di < drafts.length; di++) {
-                if (
-                  drafts[di].title === pendingDraft.title &&
-                  drafts[di].slug === pendingDraft.slug
-                ) {
-                  setPublishedDrafts((prev) => ({
-                    ...prev,
-                    [`${m.id}#${di}`]: { status: "published", id: post.id, link: post.link },
-                  }));
-                  return;
-                }
-              }
-            }
-          }}
-        />
-      )}
 
       {toast && <Toast toast={toast} />}
     </div>

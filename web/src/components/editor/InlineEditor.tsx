@@ -69,8 +69,6 @@ type Selection = { block_ids: string[] } | null;
 
 interface Props {
   sessionId: string | null;
-  /** Initial content (from a wp-post fence the user clicked "Editer" on). */
-  seedHtml?: string | null;
   onMetaSnapshot: (meta: PostMeta) => void;
   onMetaPatch?: (patch: Partial<PostMeta>) => void;
   onOriginalSnapshot: (blocks: DraftBlock[] | null) => void;
@@ -106,7 +104,6 @@ export interface EditorHandle {
  */
 export function InlineEditor({
   sessionId,
-  seedHtml,
   onMetaSnapshot,
   onMetaPatch,
   onOriginalSnapshot,
@@ -118,27 +115,6 @@ export function InlineEditor({
     schema: editorSchema,
     initialContent: [{ type: "paragraph", content: "" }] as any,
   });
-
-  // Hydrate from seed HTML on mount (when user opened the editor by clicking
-  // "Edit inline" on a wp-post DraftCard).
-  const seedApplied = useRef(false);
-  useEffect(() => {
-    if (seedApplied.current) return;
-    if (!editor || !seedHtml || !seedHtml.trim()) return;
-    seedApplied.current = true;
-    void (async () => {
-      try {
-        const blocks = await editor.tryParseHTMLToBlocks(seedHtml);
-        if (blocks.length > 0) {
-          editor.replaceBlocks(editor.document.map((b: any) => b.id), blocks);
-        }
-      } catch {
-        editor.replaceBlocks(editor.document.map((b: any) => b.id), [
-          { type: "rawHtml", props: { html: seedHtml } } as any,
-        ]);
-      }
-    })();
-  }, [editor, seedHtml]);
 
   // Highlight blocks the agent just touched for ~800ms.
   const [touched, setTouched] = useState<Set<string>>(new Set());

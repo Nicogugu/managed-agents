@@ -22,19 +22,6 @@ export function assistantToolCalls(m: ChatMessage): ToolCall[] {
   return m.blocks.flatMap((b) => (b.type === "tool" ? [b.call] : []));
 }
 
-export type WpDraft = {
-  action: "create" | "update";
-  id?: number;
-  title?: string;
-  content?: string;
-  excerpt?: string;
-  status?: "publish" | "draft" | "pending" | "private";
-  slug?: string;
-  categories?: number[];
-  tags?: (number | string)[];
-  featured_media?: number;
-};
-
 export type WpPlan = {
   title?: string;
   slug?: string;
@@ -64,11 +51,3 @@ export type WpAsk = {
   question?: string;
   options: AskOption[];
 };
-
-export type Mode = "validate" | "auto";
-
-// État de publication d'un draft (auto-publish ou modal)
-export type PublishState =
-  | { status: "pending" }
-  | { status: "published"; id: number; link: string }
-  | { status: "error"; error: string };
