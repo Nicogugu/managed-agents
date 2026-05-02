@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { InlineEditor, type EditorHandle } from "./InlineEditor";
 import { ReviewBadges } from "./ReviewBadges";
 import { PrePublishReview } from "./PrePublishReview";
 import { CmdKMenu } from "./CmdKMenu";
+import { FloatingBlockActions } from "./FloatingBlockActions";
 import { useAutosave, clearStored } from "../../lib/useAutosave";
 import { type DraftBlock, type PostMeta, emptyMeta } from "../../contract";
 import {
@@ -337,61 +338,16 @@ export function EditorPane({
         />
       </div>
 
-      {/* Quick actions bar — appears when any block is selected. */}
-      {selectionBlockIds.length > 0 && (
-        <div className="px-3 pt-2 flex-shrink-0">
-          <div className="flex items-center flex-wrap gap-1 text-xs bg-bg-tertiary border border-border rounded-md px-2 py-1">
-            <span className="text-text-tertiary mr-1">
-              {selectionBlockIds.length === 1
-                ? "Bloc sélectionné →"
-                : `${selectionBlockIds.length} blocs sélectionnés →`}
-            </span>
-            <button
-              onClick={() => quickAction("Reformule ce bloc.")}
-              className="btn-ghost !py-0.5 !px-1.5"
-            >
-              ✦ Reformuler
-            </button>
-            <button
-              onClick={() => quickAction("Raccourcis ce bloc.")}
-              className="btn-ghost !py-0.5 !px-1.5"
-            >
-              ↓ Raccourcir
-            </button>
-            <button
-              onClick={() => quickAction("Développe ce bloc.")}
-              className="btn-ghost !py-0.5 !px-1.5"
-            >
-              ↑ Allonger
-            </button>
-            <button
-              onClick={() => quickAction("Corrige fautes et tournures de ce bloc.")}
-              className="btn-ghost !py-0.5 !px-1.5"
-            >
-              ✓ Corriger
-            </button>
-            <button
-              onClick={() => quickAction("Traduis ce bloc en anglais.")}
-              className="btn-ghost !py-0.5 !px-1.5"
-            >
-              🇬🇧 Anglais
-            </button>
-            <button
-              onClick={toggleLock}
-              className="btn-ghost !py-0.5 !px-1.5"
-              title={
-                selectionBlockIds.every((id) => lockedIds.has(id))
-                  ? "Déverrouiller — l'agent peut à nouveau modifier"
-                  : "Verrouiller — l'agent ne pourra plus toucher à ce bloc"
-              }
-            >
-              {selectionBlockIds.every((id) => lockedIds.has(id))
-                ? "🔓 Déverrouiller"
-                : "🔒 Verrouiller"}
-            </button>
-          </div>
-        </div>
-      )}
+      {/* Floating block actions bubble (anchored to selection). */}
+      <FloatingBlockActions
+        selectionBlockIds={selectionBlockIds}
+        allLocked={
+          selectionBlockIds.length > 0 &&
+          selectionBlockIds.every((id) => lockedIds.has(id))
+        }
+        onAction={quickAction}
+        onToggleLock={toggleLock}
+      />
 
       {/* Review badges (when an original snapshot exists) */}
       {original && (
