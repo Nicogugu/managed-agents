@@ -45,6 +45,10 @@ export type AskOption = {
   value: string;
   emoji?: string;
   description?: string;
+  /** Special dispatch for the option click. Default: send `value` as a
+   *  text message to the agent. "review" → POST /draft/review/start
+   *  with kinds derived from `value` (e.g. "review:all" or "review:legal"). */
+  kind?: "review";
 };
 
 export type WpAsk = {

@@ -1,7 +1,7 @@
 import { Fragment, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { type ChatMessage, assistantText } from "../types";
+import { type AskOption, type ChatMessage, assistantText } from "../types";
 import { extractAsks, extractPlans, stripBlocks } from "../parseDraft";
 import { ToolCallRow } from "./ToolCallRow";
 import { AskCard } from "./AskCard";
@@ -15,7 +15,7 @@ export function MessageBubble({
   disabled,
 }: {
   message: ChatMessage;
-  onAnswerAsk: (askIdx: number, label: string, value: string) => void;
+  onAnswerAsk: (askIdx: number, label: string, value: string, option: AskOption) => void;
   askAnsweredFor: (askIdx: number) => string | undefined;
   onApprovePlan: () => void;
   disabled: boolean;
@@ -74,7 +74,7 @@ export function MessageBubble({
             <AskCard
               key={`b-${i}-ask-${idx}`}
               ask={ask}
-              onClick={(label, value) => onAnswerAsk(idx, label, value)}
+              onClick={(label, value, opt) => onAnswerAsk(idx, label, value, opt)}
               answered={askAnsweredFor(idx)}
               disabled={disabled}
             />,

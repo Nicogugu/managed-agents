@@ -55,6 +55,7 @@ export function extractAsks(text: string): WpAsk[] {
               value: o.value,
               emoji: o.emoji,
               description: o.description,
+              kind: o.kind === "review" ? "review" : undefined,
             })),
         });
       }

@@ -1,4 +1,4 @@
-import type { WpAsk } from "../types";
+import type { AskOption, WpAsk } from "../types";
 
 /**
  * Synthetic option appended to every ask card. Lets the user offload the
@@ -20,7 +20,7 @@ export function AskCard({
   disabled,
 }: {
   ask: WpAsk;
-  onClick: (label: string, value: string) => void;
+  onClick: (label: string, value: string, option: AskOption) => void;
   answered?: string;
   disabled: boolean;
 }) {
@@ -47,7 +47,7 @@ export function AskCard({
           <button
             key={i}
             type="button"
-            onClick={() => onClick(opt.label, opt.value)}
+            onClick={() => onClick(opt.label, opt.value, opt)}
             disabled={disabled}
             className="w-full text-left px-3 py-2 rounded-lg border border-border bg-bg-tertiary hover:bg-bg-elevated hover:border-accent/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
           >

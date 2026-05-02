@@ -133,6 +133,21 @@ export async function setBlockLock(
 }
 
 /**
+ * Launch a pre-publish review batch. Kinds is a subset of
+ * ["legal", "fact", "links"] (or all three for "tous"). Server runs them
+ * in parallel and emits review.* events on /draft/review/stream.
+ */
+export async function startReviewBatch(sessionId: string, kinds: string[]) {
+  const res = await fetch(`/api/sessions/${sessionId}/draft/review/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kinds }),
+  });
+  if (!res.ok) throw new Error(`review start failed: ${await res.text()}`);
+  return res.json();
+}
+
+/**
  * Roll back the last completed agent turn. The server replaces the live
  * blocks with the pre-turn snapshot and emits a draft.snapshot so any
  * subscribed editor re-renders.

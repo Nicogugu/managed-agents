@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "./useSession";
-import { sendMessage, fetchHealth } from "./api";
+import { sendMessage, fetchHealth, startReviewBatch } from "./api";
 import { extractTodos } from "./parseDraft";
 import { EditorPane } from "./components/editor/EditorPane";
 import { useDraftAutoOpen } from "./lib/useDraftAutoOpen";
@@ -159,9 +159,38 @@ export function App() {
     }
   }
 
-  async function answerAsk(askKey: string, label: string, value: string) {
+  async function answerAsk(
+    askKey: string,
+    label: string,
+    value: string,
+    option: { kind?: "review" },
+  ) {
     if (askAnswered[askKey]) return;
     setAskAnswered((prev) => ({ ...prev, [askKey]: label }));
+
+    // Special dispatch: kind:"review" options trigger the review pipeline
+    // directly instead of round-tripping a text message to the agent.
+    if (option.kind === "review" && sessionId) {
+      const tag = value.replace(/^review:/, "");
+      const kinds =
+        tag === "all" || tag === "tous"
+          ? ["legal", "fact", "links"]
+          : tag === "legal" || tag === "fact" || tag === "links"
+            ? [tag]
+            : [];
+      if (kinds.length === 0) {
+        await sendClick(label, value);
+        return;
+      }
+      setEditorOpen(true);
+      try {
+        await startReviewBatch(sessionId, kinds);
+      } catch (err: any) {
+        setToast({ text: `Erreur · ${err.message}` });
+      }
+      return;
+    }
+
     await sendClick(label, value);
   }
 
@@ -227,8 +256,8 @@ export function App() {
             <MessageBubble
               key={m.id}
               message={m}
-              onAnswerAsk={(askIdx, label, value) =>
-                answerAsk(`${m.id}#${askIdx}`, label, value)
+              onAnswerAsk={(askIdx, label, value, opt) =>
+                answerAsk(`${m.id}#${askIdx}`, label, value, opt)
               }
               askAnsweredFor={(askIdx) => askAnswered[`${m.id}#${askIdx}`]}
               onApprovePlan={() => sendClick("✓ vasy", "vasy")}
