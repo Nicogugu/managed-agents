@@ -232,7 +232,7 @@ export function App() {
         ref={scrollRef}
         className={`
           ${editorOpen
-            ? "hidden md:block md:max-w-xs lg:max-w-sm xl:max-w-md md:flex-shrink-0 md:border-r md:border-border"
+            ? "hidden md:block md:w-[320px] md:flex-shrink-0 lg:w-auto lg:basis-[58%] lg:flex-shrink lg:flex-grow-0 md:border-r md:border-border"
             : "flex-1"}
           min-h-0 overflow-auto
         `}

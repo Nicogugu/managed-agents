@@ -174,11 +174,13 @@ test.describe("Sprint 3: ping-pong agent ↔ user", () => {
     });
     await page.locator('.bn-block[data-id="para1"]').click();
 
-    // Quick actions bar should now be visible
-    await expect(page.getByText(/Bloc sélectionné/)).toBeVisible({ timeout: 3000 });
+    // Floating action bubble should now be visible
+    await expect(page.getByRole("toolbar", { name: /Actions de bloc/ })).toBeVisible({
+      timeout: 3000,
+    });
 
-    // Click "Reformuler" → sendMessage called with selection_block_ids: ["para1"]
-    await page.getByRole("button", { name: /Reformuler/ }).first().click();
+    // Click "Reformuler" (icon button with aria-label) → sendMessage with selection_block_ids
+    await page.getByRole("button", { name: "Reformuler" }).click();
 
     await expect.poll(() => state.messageCalls.length, { timeout: 3000 }).toBeGreaterThan(0);
     const lastMsg = state.messageCalls.at(-1)!;
@@ -194,7 +196,9 @@ test.describe("Sprint 3: ping-pong agent ↔ user", () => {
     await page.getByRole("button", { name: /Ouvrir l'éditeur de blocs/ }).click();
     await expect(page.locator(".bn-editor")).toBeVisible();
 
-    await page.getByRole("button", { name: /Annuler agent/ }).click();
+    // Annuler agent now lives in the MetaDrawer footer
+    await page.getByRole("button", { name: /Ouvrir le panneau méta/ }).click();
+    await page.getByRole("button", { name: /Annuler le dernier turn agent/ }).click();
     await expect.poll(() => state.undoCalls, { timeout: 3000 }).toBe(1);
   });
 
@@ -216,8 +220,8 @@ test.describe("Sprint 3: ping-pong agent ↔ user", () => {
     });
     await page.locator('.bn-block[data-id="lockme"]').click();
 
-    // Click the "Verrouiller" button in the quick actions bar
-    await page.getByRole("button", { name: /🔒 Verrouiller/ }).click();
+    // Click the "Verrouiller" button in the floating bubble (icon-only, aria-label)
+    await page.getByRole("button", { name: "Verrouiller" }).click();
     await expect.poll(() => state.lockCalls.length, { timeout: 3000 }).toBe(1);
     expect(state.lockCalls[0]).toEqual({ blockId: "lockme", locked: true });
   });

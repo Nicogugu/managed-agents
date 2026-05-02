@@ -3,7 +3,7 @@ import { InlineEditor, type EditorHandle } from "./InlineEditor";
 import { ReviewBadges } from "./ReviewBadges";
 import { PrePublishReview } from "./PrePublishReview";
 import { CmdKMenu } from "./CmdKMenu";
-import { FloatingBlockActions } from "./FloatingBlockActions";
+import { MetaDrawer } from "./MetaDrawer";
 import { useAutosave, clearStored } from "../../lib/useAutosave";
 import { type DraftBlock, type PostMeta, emptyMeta } from "../../contract";
 import {
@@ -253,81 +253,68 @@ export function EditorPane({
 
   return (
     <div className="h-full w-full flex flex-col bg-bg-secondary">
-      {/* Toolbar — wraps on mobile so the title gets a full row of breathing
-          room and the action buttons go below it. */}
-      <div className="border-b border-border flex-shrink-0 px-3 py-2 space-y-2">
-        <div className="flex items-center gap-2">
-          <input
-            className="input !py-1.5 !text-sm flex-1 min-w-0 !font-medium"
-            value={meta.title}
-            onChange={(e) => onMetaChange({ title: e.target.value })}
-            placeholder="Titre de l'article…"
-          />
-          {onClose && (
-            <button
-              onClick={onClose}
-              className="btn-ghost flex-shrink-0 !px-2"
-              aria-label="Fermer l'éditeur"
-              title="Fermer l'éditeur"
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path
-                  d="M3 3l8 8M11 3l-8 8"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-          )}
-        </div>
-        <div className="flex items-center gap-2 text-sm">
+      {/* Slim toolbar: title (full width) + status pill + Méta + Publier
+          + close. Tertiary actions (load existing post, undo agent) live
+          in the MetaDrawer footer. */}
+      <div className="border-b border-border flex-shrink-0 px-3 py-2 flex items-center gap-2">
+        <input
+          className="input !py-1.5 !text-md flex-1 min-w-0 !font-medium !border-transparent !bg-transparent focus:!border-border focus:!bg-bg-tertiary"
+          value={meta.title}
+          onChange={(e) => onMetaChange({ title: e.target.value })}
+          placeholder="Titre de l'article…"
+          aria-label="Titre"
+        />
+        <select
+          className="input !py-1 !text-xs !w-auto"
+          value={meta.status}
+          onChange={(e) => onMetaChange({ status: e.target.value as any })}
+          aria-label="Statut"
+        >
+          <option value="draft">Brouillon</option>
+          <option value="publish">Publier</option>
+          <option value="pending">En attente</option>
+          <option value="private">Privé</option>
+        </select>
+        <button
+          type="button"
+          onClick={() => setShowMeta(true)}
+          className="btn-ghost !py-1 !px-2 text-xs flex-shrink-0"
+          title="Slug, extrait, tags, SEO"
+          aria-label="Ouvrir le panneau méta"
+        >
+          ⚙
+        </button>
+        <button
+          type="button"
+          onClick={() => publish(meta.status)}
+          disabled={busy || !sessionId}
+          className="btn-primary !py-1 !px-3 text-xs flex-shrink-0"
+        >
+          {busy
+            ? "…"
+            : meta.status === "publish"
+              ? isUpdate
+                ? "Mettre à jour"
+                : "Publier"
+              : "Enregistrer"}
+        </button>
+        {onClose && (
           <button
-            onClick={loadById}
-            className="btn-ghost"
-            title="Charger un article WP par ID"
+            onClick={onClose}
+            className="btn-ghost flex-shrink-0 !p-1"
+            aria-label="Fermer l'éditeur"
+            title="Fermer l'éditeur"
           >
-            Charger…
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path
+                d="M3 3l8 8M11 3l-8 8"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
           </button>
-          <button
-            onClick={undoAgentTurn}
-            className="btn-ghost"
-            title="Annule la dernière action de l'agent (block_insert / block_update / block_delete du dernier tour)"
-          >
-            ↶ Annuler agent
-          </button>
-          <button
-            onClick={() => setShowMeta((s) => !s)}
-            className="btn-ghost"
-            title="Slug, extrait, tags, SEO"
-          >
-            ⚙ Méta
-          </button>
-          <div className="flex-1" />
-          <select
-            className="input !py-1 !text-sm !w-auto"
-            value={meta.status}
-            onChange={(e) => onMetaChange({ status: e.target.value as any })}
-          >
-            <option value="draft">Brouillon</option>
-            <option value="publish">Publier</option>
-            <option value="pending">En attente</option>
-            <option value="private">Privé</option>
-          </select>
-          <button
-            onClick={() => publish(meta.status)}
-            disabled={busy || !sessionId}
-            className="btn-primary"
-          >
-            {busy
-              ? "…"
-              : meta.status === "publish"
-                ? isUpdate
-                  ? "Mettre à jour"
-                  : "Publier"
-                : "Enregistrer"}
-          </button>
-        </div>
+        )}
       </div>
 
       {/* Pre-publish review (legal / fact-check / internal links). */}
@@ -338,16 +325,60 @@ export function EditorPane({
         />
       </div>
 
-      {/* Floating block actions bubble (anchored to selection). */}
-      <FloatingBlockActions
-        selectionBlockIds={selectionBlockIds}
-        allLocked={
-          selectionBlockIds.length > 0 &&
-          selectionBlockIds.every((id) => lockedIds.has(id))
-        }
-        onAction={quickAction}
-        onToggleLock={toggleLock}
-      />
+      {/* Quick actions strip — only when a block is selected. Slim
+          horizontal pill, icon-only buttons with aria-labels. */}
+      {selectionBlockIds.length > 0 && (
+        <div className="px-3 pt-2 flex-shrink-0">
+          <div
+            role="toolbar"
+            aria-label="Actions de bloc"
+            className="inline-flex items-center gap-0.5 bg-bg-tertiary border border-border rounded-md px-1 py-1 text-xs"
+          >
+            <span className="text-text-tertiary px-1.5 select-none">
+              {selectionBlockIds.length === 1
+                ? "Bloc :"
+                : `${selectionBlockIds.length} blocs :`}
+            </span>
+            <ActionBtn
+              label="Reformuler"
+              icon="✦"
+              onClick={() => quickAction("Reformule ce bloc.")}
+            />
+            <ActionBtn
+              label="Raccourcir"
+              icon="↓"
+              onClick={() => quickAction("Raccourcis ce bloc.")}
+            />
+            <ActionBtn
+              label="Allonger"
+              icon="↑"
+              onClick={() => quickAction("Développe ce bloc.")}
+            />
+            <ActionBtn
+              label="Corriger"
+              icon="✓"
+              onClick={() => quickAction("Corrige fautes et tournures de ce bloc.")}
+            />
+            <ActionBtn
+              label="Traduire en anglais"
+              icon="🇬🇧"
+              onClick={() => quickAction("Traduis ce bloc en anglais.")}
+            />
+            <span className="w-px h-5 bg-border mx-0.5" />
+            <ActionBtn
+              label={
+                selectionBlockIds.every((id) => lockedIds.has(id))
+                  ? "Déverrouiller"
+                  : "Verrouiller"
+              }
+              icon={
+                selectionBlockIds.every((id) => lockedIds.has(id)) ? "🔓" : "🔒"
+              }
+              onClick={toggleLock}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Review badges (when an original snapshot exists) */}
       {original && (
@@ -383,95 +414,49 @@ export function EditorPane({
           }}
           onReady={setEditorHandle}
         />
-
-        {/* Meta sidebar (toggleable) */}
-        {showMeta && (
-          <aside className="w-72 border-l border-border bg-bg-secondary p-3 overflow-auto text-sm space-y-3 flex-shrink-0">
-            <div>
-              <label className="text-xs uppercase tracking-wide text-text-tertiary">
-                Slug
-              </label>
-              <input
-                className="input mt-1 font-mono !text-sm"
-                value={meta.slug}
-                onChange={(e) => onMetaChange({ slug: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="text-xs uppercase tracking-wide text-text-tertiary">
-                Extrait
-              </label>
-              <textarea
-                className="input mt-1 min-h-[60px] resize-y !text-sm"
-                value={meta.excerpt}
-                onChange={(e) => onMetaChange({ excerpt: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="text-xs uppercase tracking-wide text-text-tertiary">
-                Tags (virgules)
-              </label>
-              <input
-                className="input mt-1 !text-sm"
-                value={(meta.tags || []).join(", ")}
-                onChange={(e) =>
-                  onMetaChange({
-                    tags: e.target.value
-                      .split(",")
-                      .map((t) => t.trim())
-                      .filter(Boolean),
-                  })
-                }
-              />
-            </div>
-            <details>
-              <summary className="text-xs uppercase tracking-wide text-text-tertiary cursor-pointer">
-                SEO
-              </summary>
-              <div className="mt-2 space-y-2">
-                <input
-                  className="input !text-sm"
-                  placeholder="Meta title"
-                  value={meta.seo.title || ""}
-                  onChange={(e) =>
-                    onMetaChange({ seo: { ...meta.seo, title: e.target.value } })
-                  }
-                />
-                <textarea
-                  className="input !text-sm min-h-[60px] resize-y"
-                  placeholder="Meta description"
-                  value={meta.seo.description || ""}
-                  onChange={(e) =>
-                    onMetaChange({
-                      seo: { ...meta.seo, description: e.target.value },
-                    })
-                  }
-                />
-                <input
-                  className="input !text-sm"
-                  placeholder="Mot-clé focus"
-                  value={meta.seo.focus_keyword || ""}
-                  onChange={(e) =>
-                    onMetaChange({
-                      seo: { ...meta.seo, focus_keyword: e.target.value },
-                    })
-                  }
-                />
-              </div>
-            </details>
-            {meta.post_id && (
-              <div className="text-xs text-text-muted font-mono">
-                post_id #{meta.post_id}
-              </div>
-            )}
-          </aside>
-        )}
       </div>
+
+      <MetaDrawer
+        open={showMeta}
+        meta={meta}
+        onChange={onMetaChange}
+        onClose={() => setShowMeta(false)}
+        onLoadPost={() => {
+          setShowMeta(false);
+          loadById();
+        }}
+        onUndoAgent={() => {
+          setShowMeta(false);
+          undoAgentTurn();
+        }}
+      />
 
       <CmdKMenu
         selectionBlockIds={selectionBlockIds}
         onSubmit={(prompt, preset) => sendCmdK(prompt, preset)}
       />
     </div>
+  );
+}
+
+function ActionBtn({
+  label,
+  icon,
+  onClick,
+}: {
+  label: string;
+  icon: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className="px-1.5 py-0.5 rounded hover:bg-bg-elevated text-text-secondary hover:text-text-primary transition-colors leading-none"
+    >
+      {icon}
+    </button>
   );
 }

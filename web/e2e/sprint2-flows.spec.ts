@@ -105,96 +105,34 @@ async function pushDraftOp(page: Page, op: any) {
   );
 }
 
-async function setMode(page: Page, mode: "auto" | "validate") {
-  await page.evaluate((m) => localStorage.setItem("mode", m), mode);
-}
-
-test.describe("Sprint 2: auto-publish on meta.status", () => {
-  test("in auto mode, meta_update status=publish triggers /draft/publish", async ({
+test.describe("Sprint 2: meta.status flips do NOT auto-publish anymore", () => {
+  test("status=publish from agent meta_update does not call /draft/publish", async ({
     page,
   }) => {
     const state: MockState = { publishCalls: [] };
     await setupMocks(page, state);
     await page.goto("/");
-    // mode persisted via localStorage; default is auto, but force it
-    await setMode(page, "auto");
-    await page.reload();
     await expect(page.getByText(/Propose-moi 5 idées/).first()).toBeVisible({
       timeout: 10_000,
     });
 
-    // Open editor + push some content + meta with status=publish
     await page.getByRole("button", { name: /Ouvrir l'éditeur de blocs/ }).click();
     await expect(page.locator(".bn-editor")).toBeVisible({ timeout: 5_000 });
 
     await pushDraftOp(page, {
       op: "block_insert",
       after_id: null,
-      block: { id: "h1", type: "heading", content: "Article auto", props: { level: 1 } },
+      block: { id: "h1", type: "heading", content: "Article", props: { level: 1 } },
     });
     await pushDraftOp(page, {
       op: "meta_update",
-      meta: { title: "Article auto", status: "publish" },
+      meta: { title: "Article", status: "publish" },
     });
 
-    // The auto-publish effect should fire within a few hundred ms
-    await expect.poll(() => state.publishCalls.length, { timeout: 4000 }).toBeGreaterThan(0);
-    expect(state.publishCalls[0].body.status).toBe("publish");
-  });
-
-  test("in validate mode, meta_update status=publish does NOT auto-publish", async ({
-    page,
-  }) => {
-    const state: MockState = { publishCalls: [] };
-    await setupMocks(page, state);
-    await page.goto("/");
-    await setMode(page, "validate");
-    await page.reload();
-    await expect(page.getByText(/Propose-moi 5 idées/).first()).toBeVisible({
-      timeout: 10_000,
-    });
-
-    await page.getByRole("button", { name: /Ouvrir l'éditeur de blocs/ }).click();
-    await expect(page.locator(".bn-editor")).toBeVisible();
-
-    await pushDraftOp(page, {
-      op: "block_insert",
-      after_id: null,
-      block: { id: "h2", type: "heading", content: "Manual" },
-    });
-    await pushDraftOp(page, {
-      op: "meta_update",
-      meta: { title: "Manual", status: "publish" },
-    });
-
-    // Wait long enough that an auto-publish would have fired
+    // Auto-publish was removed: nothing should be published unless the
+    // user clicks the Publier button.
     await page.waitForTimeout(1500);
     expect(state.publishCalls).toHaveLength(0);
-  });
-
-  test("auto-publish doesn't loop: same key only fires once", async ({ page }) => {
-    const state: MockState = { publishCalls: [] };
-    await setupMocks(page, state);
-    await page.goto("/");
-    await setMode(page, "auto");
-    await page.reload();
-    await expect(page.getByText(/Propose-moi 5 idées/).first()).toBeVisible({
-      timeout: 10_000,
-    });
-    await page.getByRole("button", { name: /Ouvrir l'éditeur de blocs/ }).click();
-    await expect(page.locator(".bn-editor")).toBeVisible();
-
-    // Send the same status-publish meta several times
-    for (let i = 0; i < 3; i++) {
-      await pushDraftOp(page, {
-        op: "meta_update",
-        meta: { title: "Once", status: "publish" },
-      });
-      await page.waitForTimeout(200);
-    }
-    await expect.poll(() => state.publishCalls.length, { timeout: 3000 }).toBeGreaterThan(0);
-    // Should be exactly 1 — same (post_id|status|title) key
-    expect(state.publishCalls).toHaveLength(1);
   });
 });
 
@@ -205,8 +143,6 @@ test.describe("Sprint 2: Superprof raw_html block", () => {
     const state: MockState = { publishCalls: [] };
     await setupMocks(page, state);
     await page.goto("/");
-    await setMode(page, "validate");
-    await page.reload();
     await expect(page.getByText(/Propose-moi 5 idées/).first()).toBeVisible({
       timeout: 10_000,
     });
@@ -242,8 +178,6 @@ test.describe("Sprint 2: Superprof raw_html block", () => {
     const state: MockState = { publishCalls: [] };
     await setupMocks(page, state);
     await page.goto("/");
-    await setMode(page, "validate");
-    await page.reload();
     await expect(page.getByText(/Propose-moi 5 idées/).first()).toBeVisible({
       timeout: 10_000,
     });
@@ -278,8 +212,6 @@ test.describe("Sprint 2: Superprof raw_html block", () => {
     const state: MockState = { publishCalls: [] };
     await setupMocks(page, state);
     await page.goto("/");
-    await setMode(page, "validate");
-    await page.reload();
     await expect(page.getByText(/Propose-moi 5 idées/).first()).toBeVisible({
       timeout: 10_000,
     });
